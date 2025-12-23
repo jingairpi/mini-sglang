@@ -66,7 +66,7 @@ class CPUAttentionBackend(BaseAttnBackend):
 
         output = []
         start = 0
-        for i, req in enumerate(batch.padded_reqs):
+        for i, req in enumerate(batch.reqs):  # Use actual reqs, not padded
             q_len = req.extend_len
             
             if batch.is_decode:
