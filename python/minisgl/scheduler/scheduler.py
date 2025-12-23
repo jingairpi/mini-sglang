@@ -14,6 +14,7 @@ from minisgl.message import (
     UserMsg,
 )
 from minisgl.utils import init_logger
+from minisgl import device as device_mod
 from transformers import AutoTokenizer
 
 from .cache import CacheManager
@@ -51,9 +52,13 @@ class Scheduler(SchedulerIOMixin):
 
         # use another stream to overlap metadata processing with computation
         self.device = self.engine.device
-        self.stream = torch.cuda.Stream(device=self.device)
-        self.engine_stream_ctx = torch.cuda.stream(self.engine.stream)
-        torch.cuda.set_stream(self.stream)
+        if device_mod.is_cuda():
+            self.stream = torch.cuda.Stream(device=self.device)
+            self.engine_stream_ctx = torch.cuda.stream(self.engine.stream)
+            torch.cuda.set_stream(self.stream)
+        else:
+            self.stream = None
+            self.engine_stream_ctx = device_mod.nvtx_range("CPU Context") # Dummy context
 
         # initialize other managers
         self.table_manager = TableManager(config.max_running_req, self.engine.page_table)
@@ -249,7 +254,8 @@ class Scheduler(SchedulerIOMixin):
         ongoing_data = None
         if forward_input is not None:
             with self.engine_stream_ctx:  # run the batch in the engine's stream
-                self.engine.stream.wait_stream(self.stream)
+                if self.stream:
+                    self.engine.stream.wait_stream(self.stream)
                 ongoing_data = (forward_input, self._forward(forward_input))
 
         self._process_last_data(last_data, ongoing_data)
@@ -269,9 +275,10 @@ class Scheduler(SchedulerIOMixin):
 
     @torch.inference_mode()
     def run_forever(self) -> NoReturn:
-        if ENV.DISABLE_OVERLAP_SCHEDULING:
+        if ENV.DISABLE_OVERLAP_SCHEDULING or self.stream is None:
             with self.engine_stream_ctx:
-                self.engine.stream.wait_stream(self.stream)
+                if self.stream:
+                    self.engine.stream.wait_stream(self.stream)
                 while True:
                     self.normal_loop()
         else:
@@ -281,6 +288,7 @@ class Scheduler(SchedulerIOMixin):
                 data = self.overlap_loop(data)
 
     def shutdown(self) -> None:
-        torch.cuda.synchronize(self.device)
+        if device_mod.is_cuda():
+            torch.cuda.synchronize(self.device)
         self.sync_all_ranks()
         self.engine.shutdown()
