@@ -32,7 +32,7 @@ class RMSNorm(BaseOP):
             self.rmsnorm = rmsnorm
 
         self.eps = eps
-        self.weight = torch.empty(size)
+        self.weight = torch.ones(size)
 
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -64,7 +64,7 @@ class RMSNormFused(BaseOP):
             self.fused_add_rmsnorm = fused_add_rmsnorm
 
         self.eps = eps
-        self.weight = torch.empty(size)
+        self.weight = torch.ones(size)
 
     def forward(
         self, x: torch.Tensor, residual: torch.Tensor | None = None
