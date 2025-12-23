@@ -36,48 +36,62 @@ class RotaryEmbedding(StateLessOP):
         if device_mod.is_cpu():
             def cpu_rope(positions, query, key, head_size, cos_sin_cache, is_neox=True):
                 # Manual RoPE implementation
-                # query: [num_tokens, num_q_heads, head_size]
-                # key:   [num_tokens, num_k_heads, head_size]
+                # query: [num_tokens, num_q_heads * head_size] (2D flattened)
+                # key:   [num_tokens, num_k_heads * head_size] (2D flattened)
                 # positions: [num_tokens]
-                # cos_sin_cache: [max_pos, rot_dim * 2] (cos, sin)
+                # cos_sin_cache: [max_pos, head_size] (cos and sin each head_size/2, concatenated)
                 
-                # Extract cos, sin for positions
-                # cos_sin shape: [num_tokens, rot_dim * 2] (where rot_dim is head_size)
-                # cache stores [cos, sin], each of size head_size/2
-                # Wait, init says:
-                # inv_freq size is rotary_dim / 2
-                # cos is size rotary_dim / 2
-                # cache is cat(cos, sin) -> size rotary_dim
+                num_tokens = query.shape[0]
+                num_q_heads = query.shape[1] // head_size
+                num_k_heads = key.shape[1] // head_size
                 
-                # So cos_sin[positions] has size [num_tokens, head_size]
-                # We need to split it into cos and sin, each size head_size/2
-                cos_sin = cos_sin_cache[positions]
-                cos, sin = cos_sin.chunk(2, dim=-1)
+                # Reshape to [num_tokens, num_heads, head_size]
+                q = query.view(num_tokens, num_q_heads, head_size)
+                k = key.view(num_tokens, num_k_heads, head_size)
                 
-                # Repeat to matching head_size [num_tokens, head_size]
-                cos = torch.cat([cos, cos], dim=-1)
-                sin = torch.cat([sin, sin], dim=-1)
+                # Get cos and sin for these positions
+                # cos_sin_cache: [max_pos, head_size]
+                # positions: [num_tokens]
+                cos_sin = cos_sin_cache[positions]  # [num_tokens, head_size]
                 
-                # Reshape for broadcasting [num_tokens, 1, head_size]
+                # Split into cos and sin (each head_size/2)
+                half_dim = head_size // 2
+                cos = cos_sin[..., :half_dim]  # [num_tokens, head_size/2]
+                sin = cos_sin[..., half_dim:]  # [num_tokens, head_size/2]
+                
+                # Reshape for broadcasting: [num_tokens, 1, head_size/2]
                 cos = cos.unsqueeze(1)
                 sin = sin.unsqueeze(1)
                 
                 def rotate_half(x):
-                    # split at half of the last dim
-                    mid = x.shape[-1] // 2
-                    x1 = x[..., :mid]
-                    x2 = x[..., mid:]
+                    # x: [num_tokens, num_heads, head_size]
+                    # Split into first half and second half of head_size
+                    x1 = x[..., :half_dim]
+                    x2 = x[..., half_dim:]
+                    # Rotate: [-x2, x1]
                     return torch.cat((-x2, x1), dim=-1)
-
-                # Split q, k into rotary and non-rotary parts if layout allows?
-                # FlashInfer assumes head_size == rot_dim usually, or handles it.
-                # Here we assert rot_dim == head_size, so full rotation.
                 
-                q_embed = (query * cos) + (rotate_half(query) * sin)
-                k_embed = (key * cos) + (rotate_half(key) * sin)
+                # Apply rotation
+                # q: [num_tokens, num_heads, head_size]
+                # We need to apply cos to first half, sin to rotated second half
+                # Standard RoPE: q_rotated = q * [cos, cos] + rotate(q) * [sin, sin]
+                # where rotate swaps halves
                 
-                query.copy_(q_embed)
-                key.copy_(k_embed)
+                q1, q2 = q[..., :half_dim], q[..., half_dim:]
+                k1, k2 = k[..., :half_dim], k[..., half_dim:]
+                
+                # Apply RoPE per half
+                q1_rot = q1 * cos - q2 * sin
+                q2_rot = q2 * cos + q1 * sin
+                k1_rot = k1 * cos - k2 * sin
+                k2_rot = k2 * cos + k1 * sin
+                
+                q_rotated = torch.cat([q1_rot, q2_rot], dim=-1)
+                k_rotated = torch.cat([k1_rot, k2_rot], dim=-1)
+                
+                # Flatten back to [num_tokens, num_heads * head_size]
+                query.copy_(q_rotated.view(num_tokens, -1))
+                key.copy_(k_rotated.view(num_tokens, -1))
 
             self.apply_rope_with_cos_sin_cache_inplace = cpu_rope
         else:
