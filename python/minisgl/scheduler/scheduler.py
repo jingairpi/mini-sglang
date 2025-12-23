@@ -119,7 +119,8 @@ class Scheduler(SchedulerIOMixin):
         if last_data is None:
             return
         batch, (_, next_tokens_cpu, copy_done) = last_data[0].batch, last_data[1]
-        copy_done.synchronize()
+        if copy_done is not None:
+            copy_done.synchronize()
         reply: List[DetokenizeMsg] = []
 
         for i, req in enumerate(batch.reqs):
