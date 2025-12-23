@@ -72,6 +72,8 @@ class GraphRunner:
             logger.info_rank0("CUDA graph is disabled.")
             self.max_graph_bs = 0
             self.graph_map = {}
+            self.graph_bs_list = []
+            self.dummy_req = dummy_req
             return
 
         cuda_graph_bs = sorted(set(cuda_graph_bs), reverse=True)
