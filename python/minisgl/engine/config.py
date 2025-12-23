@@ -17,6 +17,7 @@ class EngineConfig:
     model_path: str
     tp_info: DistributedInfo
     dtype: torch.dtype
+    device: str = "auto"
     max_running_req: int = 256
     attention_backend: str = "auto"
     moe_backend: str = "auto"
