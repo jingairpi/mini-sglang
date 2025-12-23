@@ -42,19 +42,31 @@ class RotaryEmbedding(StateLessOP):
                 # cos_sin_cache: [max_pos, rot_dim * 2] (cos, sin)
                 
                 # Extract cos, sin for positions
-                # cos_sin shape: [num_tokens, rot_dim * 2]
+                # cos_sin shape: [num_tokens, rot_dim * 2] (where rot_dim is head_size)
+                # cache stores [cos, sin], each of size head_size/2
+                # Wait, init says:
+                # inv_freq size is rotary_dim / 2
+                # cos is size rotary_dim / 2
+                # cache is cat(cos, sin) -> size rotary_dim
+                
+                # So cos_sin[positions] has size [num_tokens, head_size]
+                # We need to split it into cos and sin, each size head_size/2
                 cos_sin = cos_sin_cache[positions]
-                rot_dim = cos_sin.shape[-1] // 2
                 cos, sin = cos_sin.chunk(2, dim=-1)
                 
-                # Reshape for broadcasting
-                # cos, sin: [num_tokens, 1, rot_dim]
+                # Repeat to matching head_size [num_tokens, head_size]
+                cos = torch.cat([cos, cos], dim=-1)
+                sin = torch.cat([sin, sin], dim=-1)
+                
+                # Reshape for broadcasting [num_tokens, 1, head_size]
                 cos = cos.unsqueeze(1)
                 sin = sin.unsqueeze(1)
                 
                 def rotate_half(x):
-                    x1 = x[..., :rot_dim // 2]
-                    x2 = x[..., rot_dim // 2:]
+                    # split at half of the last dim
+                    mid = x.shape[-1] // 2
+                    x1 = x[..., :mid]
+                    x2 = x[..., mid:]
                     return torch.cat((-x2, x1), dim=-1)
 
                 # Split q, k into rotary and non-rotary parts if layout allows?
