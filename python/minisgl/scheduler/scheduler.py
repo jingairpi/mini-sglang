@@ -31,6 +31,42 @@ if TYPE_CHECKING:
 logger = init_logger(__name__)
 
 
+def _make_2d_indices(table_2d: torch.Tensor, ranges: List[Tuple[int, int, int]]) -> torch.Tensor:
+    """
+    Return the 1D indices for the given 2D table and ranges.
+
+    Example: The underlying indices of a 2D table (3, 4) are:
+        [[ 0,  1,  2,  3],
+         [ 4,  5,  6,  7],
+         [ 8,  9, 10, 11]]
+    For ranges [(0, 1, 3), (2, 0, 2)], the returned indices are [1, 2, 8, 9].
+
+    Args:
+        table_2d (torch.Tensor): The 2D table tensor.
+        ranges (List[Tuple[int, int, int]]): A list of tuples (entry, begin, end),
+            where `entry` is the row index in the 2D table, and `begin` and `end`
+            specify the range of column indices to include.
+    Returns:
+        torch.Tensor: A 1D tensor of indices.
+    """
+    assert table_2d.dim() == 2 and table_2d.is_contiguous()
+    STRIDE = table_2d.stride(0)
+    needed_size = sum(end - begin for _, begin, end in ranges)
+    pin_memory = not device_mod.is_cpu()
+    indices_host = torch.empty(needed_size, dtype=torch.int32, pin_memory=pin_memory)
+    offset = 0
+    for entry, begin, end in ranges:
+        length = end - begin
+        offset += length
+        torch.arange(
+            begin + entry * STRIDE,
+            end + entry * STRIDE,
+            dtype=torch.int32,
+            out=indices_host[offset - length : offset],
+        )
+    return indices_host.to(table_2d.device, non_blocking=True)
+
+
 # For overlap scheduling, we also need to cache some other data to avoid IMA
 class ForwardInput(NamedTuple):
     batch: Batch
