@@ -111,7 +111,7 @@ class Context:
         self.page_table = page_table
         assert (
             self.page_table.dim() == 2
-            and self.page_table.is_cuda
+            # and self.page_table.is_cuda  # Allow CPU
             and self.page_table.dtype == torch.int32
             and self.page_table.is_contiguous()
         )
