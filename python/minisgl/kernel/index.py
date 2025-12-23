@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from tvm_ffi import Module
     from tvm_ffi import Module
     
+import torch
 from minisgl import device as device_mod
 
 DEFAULT_INDEX_KERNEL_CONFIG = KernelConfig(num_threads=128, max_occupancy=1, use_pdl=False)
