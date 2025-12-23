@@ -8,6 +8,7 @@ from minisgl.core import Batch, Req, get_global_ctx
 from minisgl.distributed import get_tp_info
 from minisgl.utils import init_logger
 from tqdm import tqdm
+from minisgl import device as device_mod
 
 if TYPE_CHECKING:
     from minisgl.attention import BaseAttnBackend
@@ -23,6 +24,9 @@ def _determine_cuda_graph_bs(
 ) -> List[int]:
     if cuda_graph_bs is not None:
         return cuda_graph_bs
+
+    if device_mod.is_cpu():
+        return []
 
     free_memory_gb = free_memory / (1 << 30)
     if cuda_graph_max_bs is None:
@@ -85,13 +89,17 @@ class GraphRunner:
         )
         self.attn_backend.init_capture_graph(max_seq_len=max_seq_len, bs_list=self.graph_bs_list)
 
-        torch.cuda.synchronize(self.device)
-        torch.cuda.empty_cache()
-        torch.cuda.reset_peak_memory_stats(self.device)
+        if device_mod.is_cuda():
+            torch.cuda.synchronize(self.device)
+            torch.cuda.empty_cache()
+            torch.cuda.reset_peak_memory_stats(self.device)
+            free_memory = get_free_memory(self.device)
+            logger.info_rank0(f"Free GPU memory before capturing CUDA graphs: {mem_GB(free_memory)}")
+        else:
+            free_memory = device_mod.mem_get_info()[0]
+            logger.info_rank0(f"Free memory before capturing CUDA graphs: {mem_GB(free_memory)}")
 
         logger.info_rank0(f"Start capturing CUDA graphs with sizes: {self.graph_bs_list}")
-        free_memory = get_free_memory(self.device)
-        logger.info_rank0(f"Free GPU memory before capturing CUDA graphs: {mem_GB(free_memory)}")
 
         pbar = tqdm(
             sorted(self.graph_bs_list, reverse=True),

@@ -17,6 +17,7 @@ class ServerArgs(SchedulerConfig):
     server_port: int = 1919
     num_tokenizer: int = 0
     silent_output: bool = False
+    device: str = "auto"
 
     @property
     def share_tokenizer(self) -> bool:
@@ -207,7 +208,16 @@ def parse_args(args: List[str], run_shell: bool = False) -> Tuple[ServerArgs, bo
     parser.add_argument(
         "--shell-mode",
         action="store_true",
+        action="store_true",
         help="Run the server in shell mode.",
+    )
+
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="auto",
+        choices=["auto", "cuda", "cpu"],
+        help="The device to use.",
     )
 
     # Parse arguments
