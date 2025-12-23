@@ -35,7 +35,6 @@ class Qwen3DecoderLayer(BaseOP):
         self, x: torch.Tensor, residual: torch.Tensor | None = None
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         x, residual = self.input_layernorm.forward(x, residual)
-        x, residual = self.input_layernorm.forward(x, residual)
         with device_mod.nvtx_range(f"MHA_{self._layer_id}"):
             x = self.self_attn.forward(x)
         x, residual = self.post_attention_layernorm.forward(x, residual)
