@@ -69,18 +69,23 @@ class GraphRunner:
             free_memory=free_memory,
         )
         self.attn_backend = attn_backend
-        self.max_graph_bs = max(cuda_graph_bs) if cuda_graph_bs else 0
-        self.graph_bs_list = sorted(cuda_graph_bs)
         self.dummy_req = dummy_req
         self.stream = stream
         self.device = device
+
+        if len(cuda_graph_bs) == 0:
+            logger.info_rank0("CUDA graph is disabled.")
+            self.max_graph_bs = 0
+            self.graph_map = {}
+            self.graph_bs_list = []
+            return
+
+        self.max_graph_bs = max(cuda_graph_bs)
+        self.graph_bs_list = sorted(cuda_graph_bs)
         self.graph_map = self._capture_graphs(max_seq_len, vocab_size, model)
 
     def _capture_graphs(self, max_seq_len: int, vocab_size: int, model: BaseLLMModel):
         graph_map: Dict[int, torch.cuda.CUDAGraph] = {}
-        if self.max_graph_bs == 0:
-            logger.info_rank0("CUDA graph is disabled.")
-            return graph_map
 
         self.logits = torch.empty(
             (self.max_graph_bs, vocab_size),
