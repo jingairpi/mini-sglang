@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Protocol
 
 import torch
 from minisgl.utils import Registry, init_logger, is_sm90_supported, is_sm100_supported
+from minisgl import device as device_mod
 
 from .base import BaseAttnBackend, BaseAttnMetadata, HybridBackend
 
@@ -24,6 +25,8 @@ SUPPORTED_ATTENTION_BACKENDS = Registry[BackendCreator]("Attention Backend")
 
 
 def _resolve_auto_backend(config: ModelConfig) -> str:
+    if device_mod.is_cpu():
+        return "cpu"
     if is_sm100_supported():  # blackwell
         return "fi"
     elif is_sm90_supported():  # hopper
@@ -44,6 +47,13 @@ def create_fa3_backend(config: ModelConfig, kvcache: BaseKVCache, page_table: to
     from .fa3 import FlashAttentionBackend
 
     return FlashAttentionBackend(config, kvcache, page_table)
+
+
+@SUPPORTED_ATTENTION_BACKENDS.register("cpu")
+def create_cpu_backend(config: ModelConfig, kvcache: BaseKVCache, page_table: torch.Tensor):
+    from .cpu import CPUAttentionBackend
+
+    return CPUAttentionBackend(config, kvcache, page_table)
 
 
 def create_attention_backend(
