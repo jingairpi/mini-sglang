@@ -50,7 +50,11 @@ class CPUAttentionBackend(BaseAttnBackend):
     def forward(
         self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, layer_id: int, batch: Batch
     ) -> torch.Tensor:
-        # 1. Store KV
+        # q: [num_tokens, num_q_heads, head_dim] - already 3D
+        # k: [num_tokens, num_kv_heads * head_dim] - 2D, for storage
+        # v: [num_tokens, num_kv_heads * head_dim] - 2D, for storage
+        
+        # 1. Store KV (k, v are 2D)
         self.kvcache.store_kv(k, v, batch.out_loc, layer_id)
 
         # 2. Compute Attention
@@ -70,13 +74,9 @@ class CPUAttentionBackend(BaseAttnBackend):
         all_k = k_cache[meta.indices]  # [total_tokens, num_kv_heads, head_dim]
         all_v = v_cache[meta.indices]
 
-        # Get num_q_heads from q. q shape: [total_q_tokens, num_q_heads * head_dim] (2D flattened)
-        # After reshape: [total_q_tokens, num_q_heads, head_dim]
-        num_q_heads = q.shape[1] // self.dim
+        # Q is already 3D: [total_q_tokens, num_q_heads, head_dim]
+        num_q_heads = q.shape[1]
         num_kv_heads = all_k.shape[1]
-        
-        # Reshape q to [total_q_tokens, num_q_heads, head_dim]
-        q = q.view(-1, num_q_heads, self.dim)
 
         output = []
         start = 0
@@ -115,8 +115,9 @@ class CPUAttentionBackend(BaseAttnBackend):
             # Transpose back: [num_q_heads, q_len, head_dim] -> [q_len, num_q_heads, head_dim]
             output.append(out_i.transpose(0, 1))
 
-        # Concatenate and flatten back to [total_q_tokens, num_q_heads * head_dim]
+        # Concatenate - output will be [total_q_tokens, num_q_heads, head_dim]
         out = torch.cat(output, dim=0)
+        # Flatten to [total_q_tokens, num_q_heads * head_dim]
         return out.reshape(out.shape[0], -1)
 
     def init_capture_graph(self, max_seq_len: int, bs_list: List[int]) -> None:
