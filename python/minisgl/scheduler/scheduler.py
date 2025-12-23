@@ -53,7 +53,8 @@ def _make_2d_indices(table_2d: torch.Tensor, ranges: List[Tuple[int, int, int]])
     assert table_2d.dim() == 2 and table_2d.is_contiguous()
     STRIDE = table_2d.stride(0)
     needed_size = sum(end - begin for _, begin, end in ranges)
-    indices_host = torch.empty(needed_size, dtype=torch.int32, pin_memory=True)
+    pin_memory = not device_mod.is_cpu()
+    indices_host = torch.empty(needed_size, dtype=torch.int32, pin_memory=pin_memory)
     offset = 0
     for entry, begin, end in ranges:
         length = end - begin
