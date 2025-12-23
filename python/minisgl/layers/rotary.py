@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, Tuple
 import torch
 
 from .base import StateLessOP
+from minisgl import device as device_mod
 
 
 class RotaryEmbedding(StateLessOP):
@@ -32,9 +33,45 @@ class RotaryEmbedding(StateLessOP):
         self._cos_sin_cache = torch.cat((cos, sin), dim=-1)
         assert self.head_size in [64, 128, 256, 512]
 
-        from flashinfer import apply_rope_with_cos_sin_cache_inplace
+        if device_mod.is_cpu():
+            def cpu_rope(positions, query, key, head_size, cos_sin_cache, is_neox=True):
+                # Manual RoPE implementation
+                # query: [num_tokens, num_q_heads, head_size]
+                # key:   [num_tokens, num_k_heads, head_size]
+                # positions: [num_tokens]
+                # cos_sin_cache: [max_pos, rot_dim * 2] (cos, sin)
+                
+                # Extract cos, sin for positions
+                # cos_sin shape: [num_tokens, rot_dim * 2]
+                cos_sin = cos_sin_cache[positions]
+                rot_dim = cos_sin.shape[-1] // 2
+                cos, sin = cos_sin.chunk(2, dim=-1)
+                
+                # Reshape for broadcasting
+                # cos, sin: [num_tokens, 1, rot_dim]
+                cos = cos.unsqueeze(1)
+                sin = sin.unsqueeze(1)
+                
+                def rotate_half(x):
+                    x1 = x[..., :rot_dim // 2]
+                    x2 = x[..., rot_dim // 2:]
+                    return torch.cat((-x2, x1), dim=-1)
 
-        self.apply_rope_with_cos_sin_cache_inplace = apply_rope_with_cos_sin_cache_inplace
+                # Split q, k into rotary and non-rotary parts if layout allows?
+                # FlashInfer assumes head_size == rot_dim usually, or handles it.
+                # Here we assert rot_dim == head_size, so full rotation.
+                
+                q_embed = (query * cos) + (rotate_half(query) * sin)
+                k_embed = (key * cos) + (rotate_half(key) * sin)
+                
+                query.copy_(q_embed)
+                key.copy_(k_embed)
+
+            self.apply_rope_with_cos_sin_cache_inplace = cpu_rope
+        else:
+            from flashinfer import apply_rope_with_cos_sin_cache_inplace
+            self.apply_rope_with_cos_sin_cache_inplace = apply_rope_with_cos_sin_cache_inplace
+
 
     def forward(
         self,
