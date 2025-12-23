@@ -57,12 +57,26 @@ class CPUAttentionBackend(BaseAttnBackend):
         meta = batch.attn_metadata
         assert isinstance(meta, CPUAttnMetadata)
         
-        k_cache = self.kvcache.k_cache(layer_id)  # [num_pages, heads, dim]
+        # Get cached KV - shape is [num_pages, 1, num_kv_heads, head_dim]
+        k_cache = self.kvcache.k_cache(layer_id)
         v_cache = self.kvcache.v_cache(layer_id)
+        
+        # Remove the extra dimension: [num_pages, num_kv_heads, head_dim]
+        k_cache = k_cache.squeeze(1)
+        v_cache = v_cache.squeeze(1)
 
-        # Gather all K/V for the batch
-        all_k = k_cache[meta.indices]
+        # Gather all K/V for the batch using indices
+        # meta.indices is flat list of page indices for all tokens in the batch
+        all_k = k_cache[meta.indices]  # [total_tokens, num_kv_heads, head_dim]
         all_v = v_cache[meta.indices]
+
+        # Get num_q_heads from q. q shape: [total_q_tokens, num_q_heads * head_dim] (2D flattened)
+        # After reshape: [total_q_tokens, num_q_heads, head_dim]
+        num_q_heads = q.shape[1] // self.dim
+        num_kv_heads = all_k.shape[1]
+        
+        # Reshape q to [total_q_tokens, num_q_heads, head_dim]
+        q = q.view(-1, num_q_heads, self.dim)
 
         output = []
         start = 0
@@ -70,70 +84,40 @@ class CPUAttentionBackend(BaseAttnBackend):
             q_len = req.extend_len
             
             if batch.is_decode:
-                qi = q[i : i + 1]  # [1, H, D]
+                qi = q[i : i + 1]  # [1, num_q_heads, head_dim]
             else:
-                qi = q[start : start + q_len]  # [q_len, H, D]
+                qi = q[start : start + q_len]  # [q_len, num_q_heads, head_dim]
                 start += q_len
 
-            k_start = meta.cu_seqlens[i]
-            k_end = meta.cu_seqlens[i + 1]
-            ki = all_k[k_start:k_end]  # [k_len, H, D]
+            k_start = meta.cu_seqlens[i].item()
+            k_end = meta.cu_seqlens[i + 1].item()
+            ki = all_k[k_start:k_end]  # [k_len, num_kv_heads, head_dim]
             vi = all_v[k_start:k_end]
 
-            # Transpose to [H, Q, D] for SDPA
-            qi = qi.transpose(0, 1)
-            ki = ki.transpose(0, 1)
+            # Handle GQA: repeat KV heads to match Q heads
+            if num_q_heads > num_kv_heads:
+                repeat_factor = num_q_heads // num_kv_heads
+                ki = ki.repeat_interleave(repeat_factor, dim=1)  # [k_len, num_q_heads, head_dim]
+                vi = vi.repeat_interleave(repeat_factor, dim=1)
+
+            # Transpose to [num_heads, seq_len, head_dim] for SDPA
+            qi = qi.transpose(0, 1)  # [num_q_heads, q_len, head_dim]
+            ki = ki.transpose(0, 1)  # [num_q_heads, k_len, head_dim]
             vi = vi.transpose(0, 1)
 
-            # For prefill, if we have q_len > 1, we need causal masking.
-            # But SDPA is_causal=True applies it to the WHOLE matrix [Q, K].
-            # Here Q is subset of K (at the end).
-            # The indices in ki correspond to [0...k_len-1].
-            # The indices in qi correspond to [k_len-q_len...k_len-1].
-            # We want q[t] to attend to k[0...t + (k_len-q_len)].
-            # So is_causal=True in SDPA might assume Q and K are aligned?
-            # If Q and K have different lengths, does SDPA handle it?
-            # PyTorch SDPA doc: "If is_causal is True, attn_mask will be generated...".
-            # It usually assumes triangular mask on the last dimension.
-            # If L != S, it masks out upper triangle?
-            
-            # To be safe, manual mask or avoid is_causal if not needed.
-            # For decode (q_len=1), is_causal=False is fine (attend to all K).
-            # For prefill (q_len > 1), qi is fresh tokens. ki is history + fresh.
-            # We only care about causal relation within fresh tokens.
-            # The history part is fully visible.
-            # Standard SDPA is_causal=True works if L == S.
-            # Here S >= L.
-            # We can use manual mask if needed.
-            
             if q_len > 1:
-                # Manual causal mask
-                # qi is [H, L, D], ki is [H, S, D]
-                # mask shape [L, S]
-                # mask[i, j] = -inf if j > i + (S - L)
-                L = qi.size(1)
-                S = ki.size(1)
-                mask = torch.ones((L, S), device=qi.device, dtype=torch.bool)
-                mask = torch.triu(mask, diagonal=S - L + 1)
-                # SDPA supports attn_mask
-                # Convert bool mask to float: True -> -inf, False -> 0
-                # Wait, SDPA mask: "True values indicate elements that *should be computed*?" NO.
-                # "Rational values ... added to attention logits."
-                # Or bool mask: "True -> allowed, False -> -inf" ?
-                # PyTorch docs are confusing.
-                # Let's assume is_causal=True is dangerous for L != S.
-                # Let's enforce non-causal for simple port if possible, or use better mask.
-                
-                # Check recent pytorch: is_causal works for L != S. 
-                # "The causal mask is applied to the logic matrix (L, S). Mask[i, j] = -inf if j > i + (S-L)."
-                # So it correctly masks out future tokens relative to Q's position.
+                # Prefill: use causal attention
                 out_i = F.scaled_dot_product_attention(qi, ki, vi, is_causal=True)
             else:
+                # Decode: attend to all K (not causal)
                 out_i = F.scaled_dot_product_attention(qi, ki, vi, is_causal=False)
 
+            # Transpose back: [num_q_heads, q_len, head_dim] -> [q_len, num_q_heads, head_dim]
             output.append(out_i.transpose(0, 1))
 
-        return torch.cat(output, dim=0)
+        # Concatenate and flatten back to [total_q_tokens, num_q_heads * head_dim]
+        out = torch.cat(output, dim=0)
+        return out.reshape(out.shape[0], -1)
 
     def init_capture_graph(self, max_seq_len: int, bs_list: List[int]) -> None:
         pass
