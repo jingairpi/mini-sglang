@@ -5,7 +5,6 @@ import pytest
 from dataclasses import dataclass
 from typing import Any
 from minisgl import device as device_mod
-from minisgl.core import Batch, Req
 from minisgl.attention.cpu import CPUAttentionBackend, CPUAttnMetadata
 
 @dataclass
