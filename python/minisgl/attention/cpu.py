@@ -101,23 +101,29 @@ class CPUAttentionBackend(BaseAttnBackend):
             ki = all_k[k_start:k_end]  # [k_len, num_kv_heads, head_dim]
             vi = all_v[k_start:k_end]
 
-            # Handle GQA: repeat KV heads to match Q heads
+            # Handle GQA: repeat KV heads to match Q heads using expand instead of repeat_interleave
             if num_q_heads > num_kv_heads:
+                # [k_len, num_kv_heads, head_dim] -> [k_len, num_kv_heads, group, head_dim]
                 repeat_factor = num_q_heads // num_kv_heads
-                ki = ki.repeat_interleave(repeat_factor, dim=1)  # [k_len, num_q_heads, head_dim]
-                vi = vi.repeat_interleave(repeat_factor, dim=1)
+                ki = (
+                    ki.unsqueeze(2)
+                    .expand(-1, -1, repeat_factor, -1)
+                    .reshape(ki.shape[0], num_q_heads, self.dim)
+                )
+                vi = (
+                    vi.unsqueeze(2)
+                    .expand(-1, -1, repeat_factor, -1)
+                    .reshape(vi.shape[0], num_q_heads, self.dim)
+                )
 
             # Transpose to [num_heads, seq_len, head_dim] for SDPA
             qi = qi.transpose(0, 1)  # [num_q_heads, q_len, head_dim]
             ki = ki.transpose(0, 1)  # [num_q_heads, k_len, head_dim]
             vi = vi.transpose(0, 1)
 
-            if q_len > 1:
-                # Prefill: use causal attention
-                out_i = F.scaled_dot_product_attention(qi, ki, vi, is_causal=True)
-            else:
-                # Decode: attend to all K (not causal)
-                out_i = F.scaled_dot_product_attention(qi, ki, vi, is_causal=False)
+            # Use causal mask only for prefill (>1 tokens)
+            is_causal = q_len > 1
+            out_i = F.scaled_dot_product_attention(qi, ki, vi, is_causal=is_causal)
 
             # Transpose back: [num_q_heads, q_len, head_dim] -> [q_len, num_q_heads, head_dim]
             output.append(out_i.transpose(0, 1))
