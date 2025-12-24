@@ -131,13 +131,6 @@ def _get_rope(
     raise ValueError(f"Unsupported {rope_scaling = }")
 
 
-_ROPE_DEVICE: torch.device | None = None
-
-
-def set_rope_device(device: torch.device):
-    global _ROPE_DEVICE
-    _ROPE_DEVICE = device
-
 
 @functools.cache
 def get_rope(
@@ -150,14 +143,10 @@ def get_rope(
     rope_map = dict(rope_scaling) if rope_scaling is not None else None
     t = torch.tensor([])
     if t.device == torch.device("meta"):
-        # we cannot use meta device for rope
-        if _ROPE_DEVICE is None:
-            raise RuntimeError(
-                "We cannot use meta device for rope. Please call set_rope_device() first."
-            )
-        with torch.device(_ROPE_DEVICE):
+        # Meta device cannot be used for rope; fall back to device_mod's device
+        with torch.device(device_mod.get_device()):
             return _get_rope(head_dim, rotary_dim, max_position, base, rope_map)
     return _get_rope(head_dim, rotary_dim, max_position, base, rope_map)
 
 
-__all__ = ["get_rope", "RotaryEmbedding", "set_rope_device"]
+__all__ = ["get_rope", "RotaryEmbedding"]
