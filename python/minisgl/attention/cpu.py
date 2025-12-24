@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List
+from typing import TYPE_CHECKING, List
 
 import torch
 import torch.nn.functional as F
-from minisgl import device as device_mod
+from minisgl.device import get_device
 from minisgl.core import Batch
 from minisgl.attention.base import BaseAttnBackend, BaseAttnMetadata
 from minisgl.attention.utils import make_positions
+
+if TYPE_CHECKING:
+    from minisgl.kvcache import BaseKVCache
+    from minisgl.models import ModelConfig
 
 
 @dataclass
@@ -29,7 +33,7 @@ class CPUAttentionBackend(BaseAttnBackend):
     Handles GQA via head expansion. CUDA graph methods are no-ops on CPU.
     """
     
-    def __init__(self, config, kvcache, page_table):
+    def __init__(self, config: ModelConfig, kvcache: BaseKVCache, page_table: torch.Tensor):
         self.config = config
         self.kvcache = kvcache
         self.page_table = page_table
@@ -37,7 +41,7 @@ class CPUAttentionBackend(BaseAttnBackend):
 
     def prepare_metadata(self, batch: Batch) -> None:
         reqs = batch.padded_reqs
-        device = device_mod.get_device()
+        device = get_device()
 
         # Calculate seqlens (total length for KV cache)
         seqlens = [req.device_len for req in reqs]
@@ -72,7 +76,8 @@ class CPUAttentionBackend(BaseAttnBackend):
 
         # 2. Compute Attention
         meta = batch.attn_metadata
-        assert isinstance(meta, CPUAttnMetadata)
+        if not isinstance(meta, CPUAttnMetadata):
+            raise TypeError(f"Expected CPUAttnMetadata, got {type(meta).__name__}")
         
         # Get cached KV - shape is [num_pages, 1, num_kv_heads, head_dim]
         k_cache = self.kvcache.k_cache(layer_id)
