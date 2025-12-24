@@ -58,5 +58,9 @@ ENV/
 env.bak/
 venv.bak/
 
+# Test coverage
+.coverage
+htmlcov/
+
 # lockfile
 uv.lock
