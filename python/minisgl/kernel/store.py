@@ -4,6 +4,7 @@ import functools
 from typing import TYPE_CHECKING
 
 from .utils import KernelConfig, load_jit, make_cpp_args
+from .constants import DEFAULT_KERNEL_CONFIG
 
 import torch
 from minisgl import device as device_mod
@@ -11,14 +12,12 @@ from minisgl import device as device_mod
 if TYPE_CHECKING:
     from tvm_ffi import Module
 
-DEFAULT_INDEX_KERNEL_CONFIG = KernelConfig(num_threads=128, max_occupancy=1, use_pdl=False)
-
 
 @functools.cache
 def _jit_store_module(
     element_size: int,
     *,
-    config: KernelConfig = DEFAULT_INDEX_KERNEL_CONFIG,
+    config: KernelConfig = DEFAULT_KERNEL_CONFIG,
 ) -> Module:
     args = make_cpp_args(element_size, *config)
     return load_jit(

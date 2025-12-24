@@ -16,6 +16,12 @@ if TYPE_CHECKING:
 
 logger = init_logger(__name__)
 
+# Memory thresholds for CUDA graph batch size selection
+# H200 (141GB) uses higher batch size than other GPUs
+_H200_MEMORY_THRESHOLD_GB = 80
+_HIGH_MEMORY_MAX_BATCH_SIZE = 256
+_DEFAULT_MAX_BATCH_SIZE = 160
+
 
 def _determine_cuda_graph_bs(
     cuda_graph_bs: List[int] | None,
@@ -30,10 +36,10 @@ def _determine_cuda_graph_bs(
 
     free_memory_gb = free_memory / (1 << 30)
     if cuda_graph_max_bs is None:
-        if free_memory_gb > 80:  # H200
-            cuda_graph_max_bs = 256
+        if free_memory_gb > _H200_MEMORY_THRESHOLD_GB:
+            cuda_graph_max_bs = _HIGH_MEMORY_MAX_BATCH_SIZE
         else:
-            cuda_graph_max_bs = 160
+            cuda_graph_max_bs = _DEFAULT_MAX_BATCH_SIZE
 
     if cuda_graph_max_bs < 1:
         return []
