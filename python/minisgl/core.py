@@ -31,7 +31,6 @@ class Req:
         sampling_params: SamplingParams,
         cache_handle: BaseCacheHandle,
     ) -> None:
-        assert input_ids.is_cpu
 
         self.host_ids = input_ids
         self.table_idx = table_idx
