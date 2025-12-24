@@ -52,7 +52,7 @@ def get_free_memory(device: torch.device) -> int:
 class GraphRunner:
     def __init__(
         self,
-        stream: torch.cuda.Stream,
+        stream: torch.cuda.Stream | None,
         device: torch.device,
         model: BaseLLMModel,
         attn_backend: BaseAttnBackend,

@@ -68,7 +68,6 @@ class Qwen3Model(BaseOP):
         return self.norm.forward(x, residual)[0]
 
 
-
 class Qwen3ForCausalLM(BaseLLMModel):
     def __init__(self, config: ModelConfig):
         self.model = Qwen3Model(config)
