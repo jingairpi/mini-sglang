@@ -86,8 +86,6 @@ class GraphRunner:
         self.attn_backend = attn_backend
         attn_backend.init_capture_graph(max_seq_len=max_seq_len, bs_list=cuda_graph_bs)
 
-
-
         if device_mod.is_cuda():
             torch.cuda.synchronize(device)
             torch.cuda.empty_cache()

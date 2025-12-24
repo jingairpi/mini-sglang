@@ -85,7 +85,6 @@ class LlamaForCausalLM(BaseLLMModel):
         output = self.model.forward(ctx.batch.input_ids)
         with device_mod.nvtx_range("LMHead"):
             logits = self.lm_head.forward(output)
-
         return logits
 
 
