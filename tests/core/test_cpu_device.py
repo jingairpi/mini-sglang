@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import torch
 import pytest
 from minisgl import device as device_mod

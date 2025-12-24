@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import torch
 import multiprocessing as mp
 import time
