@@ -9,8 +9,8 @@ Note: This module uses a global device singleton. For multi-threaded scenarios,
 device should be set before spawning threads.
 """
 
-import contextlib
 import threading
+from contextlib import contextmanager
 from typing import Generator
 
 import torch
@@ -77,7 +77,7 @@ def mem_get_info() -> tuple[int, int]:
         return mem.available, mem.total
 
 
-@contextlib.contextmanager
+@contextmanager
 def nvtx_range(msg: str) -> Generator[None, None, None]:
     if is_cuda():
         import torch.cuda.nvtx as nvtx
@@ -85,11 +85,6 @@ def nvtx_range(msg: str) -> Generator[None, None, None]:
             yield
     else:
         yield
-
-
-@contextlib.contextmanager
-def noop_context() -> Generator[None, None, None]:
-    yield
 
 
 __all__ = [
@@ -102,5 +97,4 @@ __all__ = [
     "empty_cache",
     "mem_get_info",
     "nvtx_range",
-    "noop_context",
 ]
