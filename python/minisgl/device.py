@@ -49,9 +49,7 @@ def mem_get_info() -> Tuple[int, int]:
     if is_cuda():
         return torch.cuda.mem_get_info()
     else:
-        # TODO: Implement accurate memory info for CPU if needed.
-        # For now return a large enough dummy value to avoid blocking checks
-        # or implement using psutil if strictly required.
+        # psutil dependency is required for CPU memory info
         import psutil
         mem = psutil.virtual_memory()
         return mem.available, mem.total
@@ -65,3 +63,8 @@ def nvtx_range(msg: str) -> Generator[None, None, None]:
             yield
     else:
         yield
+
+
+@contextlib.contextmanager
+def noop_context() -> Generator[None, None, None]:
+    yield
