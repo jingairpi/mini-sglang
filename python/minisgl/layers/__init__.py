@@ -4,7 +4,7 @@ from .base import BaseOP, OPList, StateLessOP
 from .embedding import ParallelLMHead, VocabParallelEmbedding
 from .linear import LinearColParallelMerged, LinearOProj, LinearQKVMerged, LinearRowParallel
 from .norm import RMSNorm, RMSNormFused
-from .rotary import get_rope, set_rope_device
+from .rotary import get_rope
 
 __all__ = [
     "silu_and_mul",
@@ -21,5 +21,4 @@ __all__ = [
     "RMSNorm",
     "RMSNormFused",
     "get_rope",
-    "set_rope_device",
 ]

@@ -8,12 +8,19 @@ from minisgl.core import Batch, Req, get_global_ctx
 from minisgl.distributed import get_tp_info
 from minisgl.utils import init_logger
 from tqdm import tqdm
+from minisgl import device as device_mod
 
 if TYPE_CHECKING:
     from minisgl.attention import BaseAttnBackend
     from minisgl.models import BaseLLMModel
 
 logger = init_logger(__name__)
+
+# Memory thresholds for CUDA graph batch size selection
+# H200 (141GB) uses higher batch size than other GPUs
+_H200_MEMORY_THRESHOLD_GB = 80
+_HIGH_MEMORY_MAX_BATCH_SIZE = 256
+_DEFAULT_MAX_BATCH_SIZE = 160
 
 
 def _determine_cuda_graph_bs(
@@ -24,12 +31,15 @@ def _determine_cuda_graph_bs(
     if cuda_graph_bs is not None:
         return cuda_graph_bs
 
+    if device_mod.is_cpu():
+        return []
+
     free_memory_gb = free_memory / (1 << 30)
     if cuda_graph_max_bs is None:
-        if free_memory_gb > 80:  # H200
-            cuda_graph_max_bs = 256
+        if free_memory_gb > _H200_MEMORY_THRESHOLD_GB:
+            cuda_graph_max_bs = _HIGH_MEMORY_MAX_BATCH_SIZE
         else:
-            cuda_graph_max_bs = 160
+            cuda_graph_max_bs = _DEFAULT_MAX_BATCH_SIZE
 
     if cuda_graph_max_bs < 1:
         return []
@@ -48,7 +58,7 @@ def get_free_memory(device: torch.device) -> int:
 class GraphRunner:
     def __init__(
         self,
-        stream: torch.cuda.Stream,
+        stream: torch.cuda.Stream | None,
         device: torch.device,
         model: BaseLLMModel,
         attn_backend: BaseAttnBackend,
@@ -68,6 +78,8 @@ class GraphRunner:
             logger.info_rank0("CUDA graph is disabled.")
             self.max_graph_bs = 0
             self.graph_map = {}
+            self.graph_bs_list = []
+            self.dummy_req = dummy_req
             return
 
         cuda_graph_bs = sorted(set(cuda_graph_bs), reverse=True)
@@ -80,13 +92,17 @@ class GraphRunner:
         self.attn_backend = attn_backend
         attn_backend.init_capture_graph(max_seq_len=max_seq_len, bs_list=cuda_graph_bs)
 
-        torch.cuda.synchronize(device)
-        torch.cuda.empty_cache()
-        torch.cuda.reset_peak_memory_stats(device)
+        if device_mod.is_cuda():
+            torch.cuda.synchronize(device)
+            torch.cuda.empty_cache()
+            torch.cuda.reset_peak_memory_stats(device)
+            free_memory = get_free_memory(device)
+            logger.info_rank0(f"Free GPU memory before capturing CUDA graphs: {mem_GB(free_memory)}")
+        else:
+            free_memory = device_mod.mem_get_info()[0]
+            logger.info_rank0(f"Free memory before capturing CUDA graphs: {mem_GB(free_memory)}")
 
         logger.info_rank0(f"Start capturing CUDA graphs with sizes: {cuda_graph_bs}")
-        free_memory = get_free_memory(device)
-        logger.info_rank0(f"Free GPU memory before capturing CUDA graphs: {mem_GB(free_memory)}")
 
         # warm up by capturing a graph and then destroying it
         g = torch.cuda.CUDAGraph()

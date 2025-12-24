@@ -31,7 +31,6 @@ class Req:
         sampling_params: SamplingParams,
         cache_handle: BaseCacheHandle,
     ) -> None:
-        assert input_ids.is_cpu
 
         self.host_ids = input_ids
         self.table_idx = table_idx
@@ -111,13 +110,13 @@ class Context:
         self.page_table = page_table
         assert (
             self.page_table.dim() == 2
-            and self.page_table.is_cuda
             and self.page_table.dtype == torch.int32
             and self.page_table.is_contiguous()
         )
         self.kv_cache = kv_cache
         self.attn_backend = attn_backend
-        assert page_size == 1
+        if page_size != 1:
+            raise ValueError(f"Currently only page_size=1 is supported, got {page_size}")
 
     def set_batch(self, batch: Batch):
         assert self._batch is None
