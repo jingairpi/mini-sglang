@@ -5,11 +5,11 @@ from typing import TYPE_CHECKING
 
 from .utils import KernelConfig, load_jit, make_cpp_args
 
-if TYPE_CHECKING:
-    from tvm_ffi import Module
-
 import torch
 from minisgl import device as device_mod
+
+if TYPE_CHECKING:
+    from tvm_ffi import Module
 
 DEFAULT_INDEX_KERNEL_CONFIG = KernelConfig(num_threads=128, max_occupancy=1, use_pdl=False)
 

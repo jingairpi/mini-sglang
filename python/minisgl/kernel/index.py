@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Tuple
 from .utils import KernelConfig, load_jit, make_cpp_args
 
 if TYPE_CHECKING:
-    import torch
     from tvm_ffi import Module
 
 import torch
