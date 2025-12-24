@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from tvm_ffi import Module
 
 import torch
-from minisgl import device as device_mod
+from minisgl.device import is_cpu
 
 
 @functools.cache
@@ -36,10 +36,15 @@ def indexing(
     output: torch.Tensor | None = None,
     vocab_range: Tuple[int, int] | None = None,  # (start, length)
 ) -> torch.Tensor:
+    """Perform indexed lookup into weights tensor (embedding).
+    
+    On CPU, uses PyTorch's F.embedding. On CUDA, uses JIT-compiled kernel.
+    Supports vocab-parallel mode via vocab_range for tensor parallelism.
+    """
     if output is None:
         output = weights.new_empty(indices.shape[0], weights.shape[1])
 
-    if device_mod.is_cpu():
+    if is_cpu():
         # CPU fallback for embedding lookup
         if vocab_range is not None:
             # Vocab-parallel mode: zero-init for all-reduce, gather only local shard
