@@ -3,6 +3,7 @@ from __future__ import annotations
 import torch
 import pytest
 from dataclasses import dataclass
+from typing import Any
 from minisgl import device as device_mod
 from minisgl.core import Batch, Req
 from minisgl.attention.cpu import CPUAttentionBackend, CPUAttnMetadata
@@ -20,7 +21,7 @@ class MockReq:
 @dataclass
 class MockBatch:
     padded_reqs: list
-    attn_metadata: any = None
+    attn_metadata: Any = None
 
 def test_cpu_attention_metadata_indices():
     """Test that get_last_indices uses extend_len correctly."""

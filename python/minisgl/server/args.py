@@ -209,7 +209,6 @@ def parse_args(args: List[str], run_shell: bool = False) -> Tuple[ServerArgs, bo
     parser.add_argument(
         "--shell-mode",
         action="store_true",
-
         help="Run the server in shell mode.",
     )
 
