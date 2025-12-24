@@ -250,7 +250,8 @@ def test_cpu_store_cache(force_cpu_device):
     k_cache = torch.zeros(num_pages, num_kv_heads * head_dim)
     v_cache = torch.zeros(num_pages, num_kv_heads * head_dim)
     
-    indices = torch.randint(0, num_pages, (num_tokens,), dtype=torch.int32)
+    # Use unique indices to avoid overwrites making verification fail
+    indices = torch.arange(0, num_tokens, dtype=torch.int32)
     k = torch.randn(num_tokens, num_kv_heads * head_dim)
     v = torch.randn(num_tokens, num_kv_heads * head_dim)
     
