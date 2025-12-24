@@ -117,7 +117,8 @@ class Context:
         )
         self.kv_cache = kv_cache
         self.attn_backend = attn_backend
-        assert page_size == 1
+        if page_size != 1:
+            raise ValueError(f"Currently only page_size=1 is supported, got {page_size}")
 
     def set_batch(self, batch: Batch):
         assert self._batch is None
