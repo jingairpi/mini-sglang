@@ -113,6 +113,7 @@ def cpu_scheduler():
 
 
 @pytest.mark.integration
+@pytest.mark.slow
 @pytest.mark.timeout(120)
 def test_cpu_scheduler_starts(cpu_scheduler):
     """Test that CPU scheduler starts successfully."""
@@ -120,6 +121,7 @@ def test_cpu_scheduler_starts(cpu_scheduler):
 
 
 @pytest.mark.integration
+@pytest.mark.slow
 @pytest.mark.timeout(120)
 def test_cpu_single_request(cpu_scheduler):
     """Test processing a single request on CPU."""
@@ -148,6 +150,7 @@ def test_cpu_single_request(cpu_scheduler):
 
 
 @pytest.mark.integration
+@pytest.mark.slow
 @pytest.mark.timeout(120)
 def test_cpu_prefix_caching(cpu_scheduler):
     """Test that prefix caching works on CPU (two requests with shared prefix)."""
