@@ -14,10 +14,9 @@ from minisgl.attention.cpu import CPUAttentionBackend
 @pytest.fixture
 def force_cpu_device():
     """Force CPU device for testing, restore after test."""
-    old_device = device_mod._DEVICE
     device_mod.set_device("cpu")
     yield
-    device_mod._DEVICE = old_device
+    device_mod.reset_device()
 
 
 def test_device_explicit_cpu_setting(force_cpu_device):
