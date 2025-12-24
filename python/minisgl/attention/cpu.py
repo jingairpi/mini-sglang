@@ -14,9 +14,11 @@ from minisgl.attention.utils import make_positions
 class CPUAttnMetadata(BaseAttnMetadata):
     indices: torch.Tensor
     cu_seqlens: torch.Tensor
+    cu_extend_lens: torch.Tensor
 
     def get_last_indices(self, bs: int) -> torch.Tensor:
-        return self.cu_seqlens[1 : 1 + bs] - 1
+        # Use extend_len because model output only contains new tokens
+        return self.cu_extend_lens[1 : 1 + bs] - 1
 
 
 class CPUAttentionBackend(BaseAttnBackend):
@@ -31,9 +33,13 @@ class CPUAttentionBackend(BaseAttnBackend):
         reqs = batch.padded_reqs
         device = "cpu"
 
-        # Calculate seqlens
-        seqlens = [req.device_len for req in reqs]  # total length so far
+        # Calculate seqlens (total length for KV cache)
+        seqlens = [req.device_len for req in reqs]
         cu_seqlens = torch.tensor([0] + seqlens, dtype=torch.int32, device=device).cumsum(0)
+
+        # Calculate extend_lens (new tokens for Q and Output)
+        extend_lens = [req.extend_len for req in reqs]
+        cu_extend_lens = torch.tensor([0] + extend_lens, dtype=torch.int32, device=device).cumsum(0)
 
         # Flatten page indices
         indices_list = []
@@ -45,6 +51,7 @@ class CPUAttentionBackend(BaseAttnBackend):
             positions=make_positions(device, reqs),
             indices=indices,
             cu_seqlens=cu_seqlens,
+            cu_extend_lens=cu_extend_lens,
         )
 
     def forward(
