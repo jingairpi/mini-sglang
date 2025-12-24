@@ -24,7 +24,7 @@ logger = init_logger(__name__)
 class ForwardOutput(NamedTuple):
     next_tokens_gpu: torch.Tensor
     next_tokens_cpu: torch.Tensor
-    copy_done_event: torch.cuda.Event
+    copy_done_event: torch.cuda.Event | None
 
 
 class Engine:
