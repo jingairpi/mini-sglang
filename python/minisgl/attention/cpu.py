@@ -12,6 +12,13 @@ from minisgl.attention.utils import make_positions
 
 @dataclass
 class CPUAttnMetadata(BaseAttnMetadata):
+    """Metadata for CPU attention computation.
+    
+    Attributes:
+        indices: Flattened page indices for all tokens in the batch
+        cu_seqlens: Cumulative sequence lengths for KV cache access
+        cu_extend_lens: Cumulative extend lengths for new token output indexing
+    """
     indices: torch.Tensor
     cu_seqlens: torch.Tensor
     cu_extend_lens: torch.Tensor
@@ -22,7 +29,24 @@ class CPUAttnMetadata(BaseAttnMetadata):
 
 
 class CPUAttentionBackend(BaseAttnBackend):
+    """Attention backend for CPU inference using PyTorch's scaled_dot_product_attention.
+    
+    This backend provides a pure-PyTorch implementation suitable for CPU-only
+    environments. It handles GQA (Grouped Query Attention) via head expansion
+    and supports both prefill and decode phases.
+    
+    Note:
+        CUDA graphs are not supported on CPU, so graph-related methods are no-ops.
+    """
+    
     def __init__(self, config, kvcache, page_table):
+        """Initialize the CPU attention backend.
+        
+        Args:
+            config: Model configuration containing head dimensions and counts.
+            kvcache: KV cache for storing and retrieving key-value pairs.
+            page_table: Page table tensor for memory management.
+        """
         self.config = config
         self.kvcache = kvcache
         self.page_table = page_table

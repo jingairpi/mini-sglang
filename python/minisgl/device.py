@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+"""Device abstraction layer for Mini-SGLang.
+
+This module provides a centralized interface for device-specific operations,
+enabling seamless switching between CUDA and CPU execution modes.
+"""
+
 import contextlib
 from typing import Generator, Tuple
 
@@ -67,3 +73,16 @@ def nvtx_range(msg: str) -> Generator[None, None, None]:
 @contextlib.contextmanager
 def noop_context() -> Generator[None, None, None]:
     yield
+
+
+__all__ = [
+    "get_device",
+    "set_device",
+    "is_cuda",
+    "is_cpu",
+    "synchronize",
+    "empty_cache",
+    "mem_get_info",
+    "nvtx_range",
+    "noop_context",
+]
