@@ -15,15 +15,15 @@ class MockReq:
     table_idx: int = 0
     
     @property
-    def cached_len(self):
+    def cached_len(self) -> int:
         return self.device_len - self.extend_len
 
 @dataclass
 class MockBatch:
-    padded_reqs: list
+    padded_reqs: list[Any]
     attn_metadata: Any = None
 
-def test_cpu_attention_metadata_indices():
+def test_cpu_attention_metadata_indices() -> None:
     """Test that get_last_indices uses extend_len correctly."""
     
     # Scene: 2 requests
@@ -36,11 +36,12 @@ def test_cpu_attention_metadata_indices():
     batch = MockBatch(padded_reqs=[req1, req2])
     
     # Mock components for backend
+    @dataclass
     class MockConfig:
-        head_dim = 64
+        head_dim: int = 64
     
-    page_table = torch.zeros((2, 20), dtype=torch.int32) # Dummy page table
-    kvcache = None # Not needed for prepare_metadata
+    page_table = torch.zeros((2, 20), dtype=torch.int32)
+    kvcache: Any = None  # Not used, prepare_metadata only accesses page_table
     
     backend = CPUAttentionBackend(MockConfig(), kvcache, page_table)
     
@@ -57,15 +58,8 @@ def test_cpu_attention_metadata_indices():
     # [0, 10, 15]
     assert torch.equal(meta.cu_seqlens, torch.tensor([0, 10, 15], dtype=torch.int32))
     
-    # Verify get_last_indices
-    # Should be [3-1, 8-1] = [2, 7]
-    # Indices into the "new tokens" buffer:
-    # Req 1 occupies 0, 1, 2. Last is 2.
-    # Req 2 occupies 3, 4, 5, 6, 7. Last is 7.
-    
+    # Verify get_last_indices uses extend_lens (new tokens only)
+    # Req 1: extends by 3, occupies 0,1,2. Last is 2.
+    # Req 2: extends by 5, occupies 3,4,5,6,7. Last is 7.
     last_indices = meta.get_last_indices(bs=2)
     assert torch.equal(last_indices, torch.tensor([2, 7], dtype=torch.int32))
-    
-    # If we used device_len (old bug):
-    # cu_seqlens = [0, 10, 15]
-    # last_indices would be [9, 14] -> Out of bounds if output buffer has size 8!
