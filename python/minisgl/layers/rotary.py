@@ -10,6 +10,52 @@ from .base import StateLessOP
 from minisgl import device as device_mod
 
 
+def _cpu_rope_inplace(
+    positions: torch.Tensor,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    head_size: int,
+    cos_sin_cache: torch.Tensor,
+    is_neox: bool = True,
+) -> None:
+    """CPU implementation of RoPE (Rotary Position Embedding).
+    
+    Applies rotary position embedding in-place to query and key tensors.
+    
+    Args:
+        positions: Position indices of shape [num_tokens]
+        query: Query tensor of shape [num_tokens, num_q_heads * head_size]
+        key: Key tensor of shape [num_tokens, num_k_heads * head_size]
+        head_size: Size of each attention head
+        cos_sin_cache: Precomputed cos/sin cache of shape [max_pos, head_size]
+        is_neox: Whether to use NeoX-style rotation (unused, for API compatibility)
+    """
+    num_tokens = query.shape[0]
+    num_q_heads = query.shape[1] // head_size
+    num_k_heads = key.shape[1] // head_size
+    
+    # Reshape to [num_tokens, num_heads, head_size]
+    q = query.view(num_tokens, num_q_heads, head_size)
+    k = key.view(num_tokens, num_k_heads, head_size)
+    
+    # Get cos/sin for positions
+    cos_sin = cos_sin_cache[positions]
+    half_dim = head_size // 2
+    cos = cos_sin[..., :half_dim].unsqueeze(1)
+    sin = cos_sin[..., half_dim:].unsqueeze(1)
+    
+    # Apply RoPE rotation
+    q1, q2 = q[..., :half_dim], q[..., half_dim:]
+    k1, k2 = k[..., :half_dim], k[..., half_dim:]
+    
+    q_rotated = torch.cat([q1 * cos - q2 * sin, q2 * cos + q1 * sin], dim=-1)
+    k_rotated = torch.cat([k1 * cos - k2 * sin, k2 * cos + k1 * sin], dim=-1)
+    
+    # Write back flattened
+    query.copy_(q_rotated.view(num_tokens, -1))
+    key.copy_(k_rotated.view(num_tokens, -1))
+
+
 class RotaryEmbedding(StateLessOP):
     def __init__(
         self,
@@ -34,45 +80,10 @@ class RotaryEmbedding(StateLessOP):
         assert self.head_size in [64, 128, 256, 512]
 
         if device_mod.is_cpu():
-            def cpu_rope(positions, query, key, head_size, cos_sin_cache, is_neox=True):
-                """CPU implementation of RoPE (Rotary Position Embedding).
-                
-                Args:
-                    query: [num_tokens, num_q_heads * head_size] flattened
-                    key: [num_tokens, num_k_heads * head_size] flattened
-                    positions: [num_tokens]
-                    cos_sin_cache: [max_pos, head_size] with cos/sin concatenated
-                """
-                num_tokens = query.shape[0]
-                num_q_heads = query.shape[1] // head_size
-                num_k_heads = key.shape[1] // head_size
-                
-                # Reshape to [num_tokens, num_heads, head_size]
-                q = query.view(num_tokens, num_q_heads, head_size)
-                k = key.view(num_tokens, num_k_heads, head_size)
-                
-                # Get cos/sin for positions
-                cos_sin = cos_sin_cache[positions]
-                half_dim = head_size // 2
-                cos = cos_sin[..., :half_dim].unsqueeze(1)
-                sin = cos_sin[..., half_dim:].unsqueeze(1)
-                
-                # Apply RoPE rotation
-                q1, q2 = q[..., :half_dim], q[..., half_dim:]
-                k1, k2 = k[..., :half_dim], k[..., half_dim:]
-                
-                q_rotated = torch.cat([q1 * cos - q2 * sin, q2 * cos + q1 * sin], dim=-1)
-                k_rotated = torch.cat([k1 * cos - k2 * sin, k2 * cos + k1 * sin], dim=-1)
-                
-                # Write back flattened
-                query.copy_(q_rotated.view(num_tokens, -1))
-                key.copy_(k_rotated.view(num_tokens, -1))
-
-            self.apply_rope_with_cos_sin_cache_inplace = cpu_rope
+            self.apply_rope_with_cos_sin_cache_inplace = _cpu_rope_inplace
         else:
             from flashinfer import apply_rope_with_cos_sin_cache_inplace
             self.apply_rope_with_cos_sin_cache_inplace = apply_rope_with_cos_sin_cache_inplace
-
 
     def forward(
         self,
@@ -157,4 +168,4 @@ def get_rope(
     return _get_rope(head_dim, rotary_dim, max_position, base, rope_map)
 
 
-__all__ = ["get_rope", "RotaryEmbedding", "set_rope_device"]
+__all__ = ["get_rope", "RotaryEmbedding", "set_rope_device", "_cpu_rope_inplace"]
