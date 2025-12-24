@@ -5,6 +5,7 @@ from typing import List
 
 import torch
 import torch.nn.functional as F
+from minisgl import device as device_mod
 from minisgl.core import Batch
 from minisgl.attention.base import BaseAttnBackend, BaseAttnMetadata
 from minisgl.attention.utils import make_positions
@@ -54,7 +55,7 @@ class CPUAttentionBackend(BaseAttnBackend):
 
     def prepare_metadata(self, batch: Batch) -> None:
         reqs = batch.padded_reqs
-        device = "cpu"
+        device = device_mod.get_device()
 
         # Calculate seqlens (total length for KV cache)
         seqlens = [req.device_len for req in reqs]

@@ -18,17 +18,9 @@ def _cpu_rope_inplace(
     cos_sin_cache: torch.Tensor,
     is_neox: bool = True,
 ) -> None:
-    """CPU implementation of RoPE (Rotary Position Embedding).
+    """CPU implementation of RoPE. Applies rotary embedding in-place.
     
-    Applies rotary position embedding in-place to query and key tensors.
-    
-    Args:
-        positions: Position indices of shape [num_tokens]
-        query: Query tensor of shape [num_tokens, num_q_heads * head_size]
-        key: Key tensor of shape [num_tokens, num_k_heads * head_size]
-        head_size: Size of each attention head
-        cos_sin_cache: Precomputed cos/sin cache of shape [max_pos, head_size]
-        is_neox: Whether to use NeoX-style rotation (unused, for API compatibility)
+    Note: is_neox parameter is kept for API compatibility with flashinfer.
     """
     num_tokens = query.shape[0]
     num_q_heads = query.shape[1] // head_size
@@ -168,4 +160,4 @@ def get_rope(
     return _get_rope(head_dim, rotary_dim, max_position, base, rope_map)
 
 
-__all__ = ["get_rope", "RotaryEmbedding", "set_rope_device", "_cpu_rope_inplace"]
+__all__ = ["get_rope", "RotaryEmbedding", "set_rope_device"]
