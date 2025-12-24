@@ -110,7 +110,9 @@ class Scheduler(SchedulerIOMixin):
         self.tokenizer = AutoTokenizer.from_pretrained(config.model_path)
         self.eos_token_id = self.tokenizer.eos_token_id
         self.page_table = self.engine.page_table
+        self.page_table_flat = self.page_table.view(-1)  # Pre-computed for hot path
         self.token_pool = self.table_manager.token_pool
+        self.token_pool_flat = self.token_pool.view(-1)  # Pre-computed for hot path
         self.prefill_budget = config.max_extend_tokens
 
     def _process_last_data(
@@ -198,7 +200,7 @@ class Scheduler(SchedulerIOMixin):
             self.token_pool, [(r.table_idx, r.device_len, r.device_len + 1) for r in batch.reqs]
         )
         # NOTE: write out_loc to page_table before `prepare_metadata`
-        self.page_table.view(-1)[load_indices] = batch.out_loc
+        self.page_table_flat[load_indices] = batch.out_loc
         self.engine.attn_backend.prepare_metadata(batch)
         return ForwardInput(
             batch=batch,
@@ -216,10 +218,11 @@ class Scheduler(SchedulerIOMixin):
         return self._prepare_batch(batch) if batch else None
 
     def _load_token_ids(self, input: ForwardInput) -> None:
-        input.batch.input_ids = self.token_pool.view(-1)[input.load_indices]
+        batch, load_indices = input.batch, input.load_indices
+        batch.input_ids = self.token_pool_flat[load_indices]
 
     def _write_token_ids(self, input: ForwardInput, output: ForwardOutput) -> None:
-        self.token_pool.view(-1)[input.write_indices] = output.next_tokens_gpu
+        self.token_pool_flat[input.write_indices] = output.next_tokens_gpu
 
     def _forward(self, forward_input: ForwardInput) -> ForwardOutput:
         self._load_token_ids(forward_input)
