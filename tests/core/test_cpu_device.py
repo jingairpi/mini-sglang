@@ -28,9 +28,6 @@ def test_device_explicit_cpu_setting(force_cpu_device):
     # Test context managers don't crash
     with device_mod.nvtx_range("test"):
         pass
-    
-    with device_mod.noop_context():
-        pass
 
 
 @pytest.mark.skipif(torch.cuda.is_available(), reason="Running on CUDA device")

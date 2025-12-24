@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 from typing import TYPE_CHECKING, List, NamedTuple, NoReturn, Set, Tuple, TypeAlias
 
 import torch
@@ -94,7 +95,7 @@ class Scheduler(SchedulerIOMixin):
             torch.cuda.set_stream(self.stream)
         else:
             self.stream = None
-            self.engine_stream_ctx = device_mod.noop_context()
+            self.engine_stream_ctx = nullcontext()
 
         # initialize other managers
         self.table_manager = TableManager(config.max_running_req, self.engine.page_table)
