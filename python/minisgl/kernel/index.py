@@ -4,6 +4,7 @@ from functools import lru_cache
 from typing import TYPE_CHECKING, Tuple
 
 from .utils import KernelConfig, load_jit, make_cpp_args
+from .constants import DEFAULT_KERNEL_CONFIG
 
 if TYPE_CHECKING:
     from tvm_ffi import Module
@@ -11,15 +12,13 @@ if TYPE_CHECKING:
 import torch
 from minisgl import device as device_mod
 
-DEFAULT_INDEX_KERNEL_CONFIG = KernelConfig(num_threads=128, max_occupancy=1, use_pdl=False)
-
 
 @lru_cache(maxsize=None)
 def _jit_index_module(
     element_size: int,
     *,
     num_splits: int = 1,
-    config: KernelConfig = DEFAULT_INDEX_KERNEL_CONFIG,
+    config: KernelConfig = DEFAULT_KERNEL_CONFIG,
 ) -> Module:
     args = make_cpp_args(element_size, num_splits, *config)
     return load_jit(
