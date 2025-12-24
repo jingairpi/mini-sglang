@@ -43,7 +43,7 @@ def store_cache(
     if device_mod.is_cpu():
         k_flat = k.contiguous().view(indices.shape[0], -1)
         v_flat = v.contiguous().view(indices.shape[0], -1)
-        # We need validation? or just trust indices.
+        # Note: Caller must ensure indices are within k_cache/v_cache bounds
         k_cache[indices] = k_flat
         v_cache[indices] = v_flat
         return

@@ -6,29 +6,59 @@ from .base import BaseOP
 from minisgl import device as device_mod
 
 
+def _cpu_rmsnorm(x: torch.Tensor, weight: torch.Tensor, eps: float, out: torch.Tensor | None = None) -> torch.Tensor:
+    """CPU implementation of RMSNorm.
+    
+    Args:
+        x: Input tensor of shape [..., size]
+        weight: Weight tensor of shape [size]
+        eps: Epsilon for numerical stability
+        out: Optional output tensor for in-place operation
+        
+    Returns:
+        Normalized tensor
+    """
+    input_dtype = x.dtype
+    x = x.to(torch.float32)
+    variance = x.pow(2).mean(-1, keepdim=True)
+    x = x * torch.rsqrt(variance + eps)
+    x = x.to(input_dtype)
+    out_tensor = x * weight
+    if out is not None:
+        out.copy_(out_tensor)
+        return out
+    return out_tensor
+
+
+def _cpu_fused_add_rmsnorm(
+    x: torch.Tensor, residual: torch.Tensor, weight: torch.Tensor, eps: float
+) -> None:
+    """CPU implementation of fused add + rmsnorm.
+    
+    Performs: residual += x, then x = rmsnorm(residual)
+    Both operations are in-place.
+    
+    Args:
+        x: Input tensor, will be overwritten with normalized result
+        residual: Residual tensor, will be updated in-place
+        weight: Weight tensor for normalization
+        eps: Epsilon for numerical stability
+    """
+    residual.add_(x)
+    normed = _cpu_rmsnorm(residual, weight, eps)
+    x.copy_(normed)
+
+
 class RMSNorm(BaseOP):
     def __init__(self, size: int, eps: float) -> None:
         if device_mod.is_cpu():
-            def manual_rmsnorm(x, weight, eps, out=None):
-                """CPU implementation of RMSNorm."""
-                input_dtype = x.dtype
-                x = x.to(torch.float32)
-                variance = x.pow(2).mean(-1, keepdim=True)
-                x = x * torch.rsqrt(variance + eps)
-                x = x.to(input_dtype)
-                out_tensor = x * weight
-                if out is not None:
-                    out.copy_(out_tensor)
-                    return out
-                return out_tensor
-            self.rmsnorm = manual_rmsnorm
+            self.rmsnorm = _cpu_rmsnorm
         else:
             from flashinfer import rmsnorm
             self.rmsnorm = rmsnorm
 
         self.eps = eps
         self.weight = torch.ones(size)
-
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.rmsnorm(x, self.weight, self.eps)
@@ -40,15 +70,8 @@ class RMSNorm(BaseOP):
 class RMSNormFused(BaseOP):
     def __init__(self, size: int, eps: float) -> None:
         if device_mod.is_cpu():
-            self.rmsnorm = RMSNorm(size, eps).rmsnorm
-
-            def manual_fused_cpu(x, residual, weight, eps):
-                # Fused add + rmsnorm: residual += x, then x = rmsnorm(residual)
-                residual.add_(x)
-                normed = self.rmsnorm(residual, weight, eps)
-                x.copy_(normed)
-
-            self.fused_add_rmsnorm = manual_fused_cpu
+            self.rmsnorm = _cpu_rmsnorm
+            self.fused_add_rmsnorm = _cpu_fused_add_rmsnorm
         else:
             from flashinfer import fused_add_rmsnorm, rmsnorm
             self.rmsnorm = rmsnorm
