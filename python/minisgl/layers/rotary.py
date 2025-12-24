@@ -35,12 +35,14 @@ class RotaryEmbedding(StateLessOP):
 
         if device_mod.is_cpu():
             def cpu_rope(positions, query, key, head_size, cos_sin_cache, is_neox=True):
-                # Manual RoPE implementation
-                # query: [num_tokens, num_q_heads * head_size] (2D flattened)
-                # key:   [num_tokens, num_k_heads * head_size] (2D flattened)
-                # positions: [num_tokens]
-                # cos_sin_cache: [max_pos, head_size] (cos and sin each head_size/2, concatenated)
+                """CPU implementation of RoPE (Rotary Position Embedding).
                 
+                Args:
+                    query: [num_tokens, num_q_heads * head_size] flattened
+                    key: [num_tokens, num_k_heads * head_size] flattened
+                    positions: [num_tokens]
+                    cos_sin_cache: [max_pos, head_size] with cos/sin concatenated
+                """
                 num_tokens = query.shape[0]
                 num_q_heads = query.shape[1] // head_size
                 num_k_heads = key.shape[1] // head_size
@@ -49,47 +51,20 @@ class RotaryEmbedding(StateLessOP):
                 q = query.view(num_tokens, num_q_heads, head_size)
                 k = key.view(num_tokens, num_k_heads, head_size)
                 
-                # Get cos and sin for these positions
-                # cos_sin_cache: [max_pos, head_size]
-                # positions: [num_tokens]
-                cos_sin = cos_sin_cache[positions]  # [num_tokens, head_size]
-                
-                # Split into cos and sin (each head_size/2)
+                # Get cos/sin for positions
+                cos_sin = cos_sin_cache[positions]
                 half_dim = head_size // 2
-                cos = cos_sin[..., :half_dim]  # [num_tokens, head_size/2]
-                sin = cos_sin[..., half_dim:]  # [num_tokens, head_size/2]
+                cos = cos_sin[..., :half_dim].unsqueeze(1)
+                sin = cos_sin[..., half_dim:].unsqueeze(1)
                 
-                # Reshape for broadcasting: [num_tokens, 1, head_size/2]
-                cos = cos.unsqueeze(1)
-                sin = sin.unsqueeze(1)
-                
-                def rotate_half(x):
-                    # x: [num_tokens, num_heads, head_size]
-                    # Split into first half and second half of head_size
-                    x1 = x[..., :half_dim]
-                    x2 = x[..., half_dim:]
-                    # Rotate: [-x2, x1]
-                    return torch.cat((-x2, x1), dim=-1)
-                
-                # Apply rotation
-                # q: [num_tokens, num_heads, head_size]
-                # We need to apply cos to first half, sin to rotated second half
-                # Standard RoPE: q_rotated = q * [cos, cos] + rotate(q) * [sin, sin]
-                # where rotate swaps halves
-                
+                # Apply RoPE rotation
                 q1, q2 = q[..., :half_dim], q[..., half_dim:]
                 k1, k2 = k[..., :half_dim], k[..., half_dim:]
                 
-                # Apply RoPE per half
-                q1_rot = q1 * cos - q2 * sin
-                q2_rot = q2 * cos + q1 * sin
-                k1_rot = k1 * cos - k2 * sin
-                k2_rot = k2 * cos + k1 * sin
+                q_rotated = torch.cat([q1 * cos - q2 * sin, q2 * cos + q1 * sin], dim=-1)
+                k_rotated = torch.cat([k1 * cos - k2 * sin, k2 * cos + k1 * sin], dim=-1)
                 
-                q_rotated = torch.cat([q1_rot, q2_rot], dim=-1)
-                k_rotated = torch.cat([k1_rot, k2_rot], dim=-1)
-                
-                # Flatten back to [num_tokens, num_heads * head_size]
+                # Write back flattened
                 query.copy_(q_rotated.view(num_tokens, -1))
                 key.copy_(k_rotated.view(num_tokens, -1))
 
