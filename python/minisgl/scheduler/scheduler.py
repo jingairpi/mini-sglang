@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, List, NamedTuple, NoReturn, Set, Tuple, TypeAlias
 
 import torch
+import torch.nn.functional as F
 from minisgl.core import Batch, Req
 from minisgl.env import ENV
 from minisgl.message import (
@@ -95,7 +96,7 @@ class Scheduler(SchedulerIOMixin):
             torch.cuda.set_stream(self.stream)
         else:
             self.stream = None
-            self.engine_stream_ctx = device_mod.nvtx_range("CPU Context") # Dummy context
+            self.engine_stream_ctx = device_mod.noop_context()
 
         # initialize other managers
         self.table_manager = TableManager(config.max_running_req, self.engine.page_table)
