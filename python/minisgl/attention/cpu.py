@@ -27,7 +27,6 @@ class CPUAttentionBackend(BaseAttnBackend):
         self.kvcache = kvcache
         self.page_table = page_table
         self.dim = config.head_dim
-        self.scale = 1.0 / (self.dim**0.5)
 
     def prepare_metadata(self, batch: Batch) -> None:
         reqs = batch.padded_reqs

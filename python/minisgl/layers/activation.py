@@ -1,13 +1,8 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import torch
 import torch.nn.functional as F
 from minisgl import device as device_mod
-
-if TYPE_CHECKING:
-    pass
 
 
 def silu_and_mul(x: torch.Tensor, out: torch.Tensor | None = None) -> torch.Tensor:
