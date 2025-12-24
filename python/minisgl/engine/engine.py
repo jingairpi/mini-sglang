@@ -37,6 +37,7 @@ def _align_up_32(num: int) -> int:
 
 class Engine:
     def __init__(self, config: EngineConfig):
+        self.config = config
         self.model_config = config.model_config
         set_tp_info(rank=config.tp_info.rank, size=config.tp_info.size)
         device_mod.set_device(config.device)
@@ -197,7 +198,7 @@ class Engine:
             )
         min_free_memory = int(free_mem_tensor[0].item())
         max_free_memory = -int(free_mem_tensor[1].item())
-        if max_free_memory - min_free_memory > 2 * 1024 * 1024 * 1024:
+        if max_free_memory - min_free_memory > self.config.max_memory_imbalance:
             logger.error(
                 f"Memory across TP ranks are imbalanced:"
                 f" min {mem_GB(min_free_memory)}, max {mem_GB(max_free_memory)}"
