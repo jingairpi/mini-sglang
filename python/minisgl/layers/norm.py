@@ -9,17 +9,7 @@ from minisgl import device as device_mod
 
 
 def _cpu_rmsnorm(x: torch.Tensor, weight: torch.Tensor, eps: float, out: torch.Tensor | None = None) -> torch.Tensor:
-    """CPU implementation of RMSNorm.
-    
-    Args:
-        x: Input tensor of shape [..., size]
-        weight: Weight tensor of shape [size]
-        eps: Epsilon for numerical stability
-        out: Optional output tensor for in-place operation
-        
-    Returns:
-        Normalized tensor
-    """
+    """CPU implementation of RMSNorm. Writes to `out` if provided."""
     input_dtype = x.dtype
     x = x.to(torch.float32)
     variance = x.pow(2).mean(-1, keepdim=True)
@@ -35,17 +25,7 @@ def _cpu_rmsnorm(x: torch.Tensor, weight: torch.Tensor, eps: float, out: torch.T
 def _cpu_fused_add_rmsnorm(
     x: torch.Tensor, residual: torch.Tensor, weight: torch.Tensor, eps: float
 ) -> None:
-    """CPU implementation of fused add + rmsnorm.
-    
-    Performs: residual += x, then x = rmsnorm(residual)
-    Both operations are in-place.
-    
-    Args:
-        x: Input tensor, will be overwritten with normalized result
-        residual: Residual tensor, will be updated in-place
-        weight: Weight tensor for normalization
-        eps: Epsilon for numerical stability
-    """
+    """Fused add + rmsnorm: residual += x, then x = rmsnorm(residual). Both in-place."""
     residual.add_(x)
     normed = _cpu_rmsnorm(residual, weight, eps)
     x.copy_(normed)
