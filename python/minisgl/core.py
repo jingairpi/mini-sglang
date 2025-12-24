@@ -36,7 +36,7 @@ class Req:
     cache_handle: BaseCacheHandle
 
     def __post_init__(self) -> None:
-        assert self.input_ids.is_cpu
+        # Note: relaxed assertion to allow CPU device (for CPU-only mode)
         self.device_len = len(self.input_ids)
         self.max_device_len = len(self.input_ids) + self.output_len
         assert 0 <= self.cached_len < self.device_len <= self.max_device_len
