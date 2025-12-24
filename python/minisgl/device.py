@@ -4,32 +4,49 @@ from __future__ import annotations
 
 This module provides a centralized interface for device-specific operations,
 enabling seamless switching between CUDA and CPU execution modes.
+
+Note: This module uses a global device singleton. For multi-threaded scenarios,
+device should be set before spawning threads.
 """
 
 import contextlib
-from typing import Generator, Tuple
+import threading
+from typing import Generator
 
 import torch
 
-_DEVICE = None
+_DEVICE: torch.device | None = None
+_DEVICE_LOCK = threading.Lock()
 
 
 def get_device() -> torch.device:
     global _DEVICE
-    if _DEVICE is None:
-        if torch.cuda.is_available():
-            _DEVICE = torch.device("cuda")
-        else:
-            _DEVICE = torch.device("cpu")
-    return _DEVICE
+    with _DEVICE_LOCK:
+        if _DEVICE is None:
+            if torch.cuda.is_available():
+                _DEVICE = torch.device("cuda")
+            else:
+                _DEVICE = torch.device("cpu")
+        return _DEVICE
 
 
 def set_device(device: str) -> None:
     global _DEVICE
-    if device == "auto":
-        _DEVICE = None  # Will be detected in get_device()
-    else:
-        _DEVICE = torch.device(device)
+    with _DEVICE_LOCK:
+        if device == "auto":
+            _DEVICE = None  # Will be detected in get_device()
+        else:
+            _DEVICE = torch.device(device)
+
+
+def reset_device() -> None:
+    """Reset the device to auto-detect mode.
+    
+    This is primarily intended for testing purposes.
+    """
+    global _DEVICE
+    with _DEVICE_LOCK:
+        _DEVICE = None
 
 
 def is_cuda() -> bool:
@@ -50,7 +67,7 @@ def empty_cache() -> None:
         torch.cuda.empty_cache()
 
 
-def mem_get_info() -> Tuple[int, int]:
+def mem_get_info() -> tuple[int, int]:
     if is_cuda():
         return torch.cuda.mem_get_info()
     else:
@@ -78,6 +95,7 @@ def noop_context() -> Generator[None, None, None]:
 __all__ = [
     "get_device",
     "set_device",
+    "reset_device",
     "is_cuda",
     "is_cpu",
     "synchronize",
