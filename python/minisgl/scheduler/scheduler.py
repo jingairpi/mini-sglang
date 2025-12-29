@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 from typing import TYPE_CHECKING, List, NamedTuple, NoReturn, Set, Tuple, TypeAlias
 
 import torch
 import torch.nn.functional as F
+from minisgl import device as device_mod
 from minisgl.core import Batch, Req
 from minisgl.env import ENV
 from minisgl.message import (
@@ -52,7 +54,8 @@ def _make_2d_indices(table_2d: torch.Tensor, ranges: List[Tuple[int, int, int]])
     assert table_2d.dim() == 2 and table_2d.is_contiguous()
     STRIDE = table_2d.stride(0)
     needed_size = sum(end - begin for _, begin, end in ranges)
-    indices_host = torch.empty(needed_size, dtype=torch.int32, pin_memory=True)
+    pin_memory = not device_mod.is_cpu()
+    indices_host = torch.empty(needed_size, dtype=torch.int32, pin_memory=pin_memory)
     offset = 0
     for entry, begin, end in ranges:
         length = end - begin
@@ -87,9 +90,13 @@ class Scheduler(SchedulerIOMixin):
 
         # use another stream to overlap metadata processing with computation
         self.device = self.engine.device
-        self.stream = torch.cuda.Stream(device=self.device)
-        self.engine_stream_ctx = torch.cuda.stream(self.engine.stream)
-        torch.cuda.set_stream(self.stream)
+        if device_mod.is_cuda():
+            self.stream = torch.cuda.Stream(device=self.device)
+            self.engine_stream_ctx = torch.cuda.stream(self.engine.stream)
+            torch.cuda.set_stream(self.stream)
+        else:
+            self.stream = None
+            self.engine_stream_ctx = nullcontext()
 
         # initialize other managers
         self.table_manager = TableManager(config.max_running_req, self.engine.page_table)
@@ -104,7 +111,9 @@ class Scheduler(SchedulerIOMixin):
         self.tokenizer = AutoTokenizer.from_pretrained(config.model_path)
         self.eos_token_id = self.tokenizer.eos_token_id
         self.page_table = self.engine.page_table
+        self.page_table_flat = self.page_table.view(-1)  # Pre-computed for hot path
         self.token_pool = self.table_manager.token_pool
+        self.token_pool_flat = self.token_pool.view(-1)  # Pre-computed for hot path
         self.prefill_budget = config.max_extend_tokens
 
     def _process_last_data(
@@ -113,7 +122,8 @@ class Scheduler(SchedulerIOMixin):
         if last_data is None:
             return
         batch, (_, next_tokens_cpu, copy_done) = last_data[0].batch, last_data[1]
-        copy_done.synchronize()
+        if copy_done is not None:
+            copy_done.synchronize()
         reply = BatchTokenizerMsg(data=[])
 
         max_seq_len = self.engine.max_seq_len
@@ -191,7 +201,7 @@ class Scheduler(SchedulerIOMixin):
             self.token_pool, [(r.table_idx, r.device_len, r.device_len + 1) for r in batch.reqs]
         )
         # NOTE: write out_loc to page_table before `prepare_metadata`
-        self.page_table.view(-1)[load_indices] = batch.out_loc
+        self.page_table_flat[load_indices] = batch.out_loc
         self.engine.attn_backend.prepare_metadata(batch)
         return ForwardInput(
             batch=batch,
@@ -209,10 +219,11 @@ class Scheduler(SchedulerIOMixin):
         return self._prepare_batch(batch) if batch else None
 
     def _load_token_ids(self, input: ForwardInput) -> None:
-        input.batch.input_ids = self.token_pool.view(-1)[input.load_indices]
+        batch, load_indices = input.batch, input.load_indices
+        batch.input_ids = self.token_pool_flat[load_indices]
 
     def _write_token_ids(self, input: ForwardInput, output: ForwardOutput) -> None:
-        self.token_pool.view(-1)[input.write_indices] = output.next_tokens_gpu
+        self.token_pool_flat[input.write_indices] = output.next_tokens_gpu
 
     def _forward(self, forward_input: ForwardInput) -> ForwardOutput:
         self._load_token_ids(forward_input)
@@ -246,7 +257,8 @@ class Scheduler(SchedulerIOMixin):
         ongoing_data = None
         if forward_input is not None:
             with self.engine_stream_ctx:  # run the batch in the engine's stream
-                self.engine.stream.wait_stream(self.stream)
+                if self.stream:
+                    self.engine.stream.wait_stream(self.stream)
                 ongoing_data = (forward_input, self._forward(forward_input))
 
         self._process_last_data(last_data, ongoing_data)
@@ -266,9 +278,10 @@ class Scheduler(SchedulerIOMixin):
 
     @torch.inference_mode()
     def run_forever(self) -> NoReturn:
-        if ENV.DISABLE_OVERLAP_SCHEDULING:
+        if ENV.DISABLE_OVERLAP_SCHEDULING or self.stream is None:
             with self.engine_stream_ctx:
-                self.engine.stream.wait_stream(self.stream)
+                if self.stream:
+                    self.engine.stream.wait_stream(self.stream)
                 while True:
                     self.normal_loop()
         else:
@@ -278,6 +291,7 @@ class Scheduler(SchedulerIOMixin):
                 data = self.overlap_loop(data)
 
     def shutdown(self) -> None:
-        torch.cuda.synchronize(self.device)
+        if device_mod.is_cuda():
+            torch.cuda.synchronize(self.device)
         self.sync_all_ranks()
         self.engine.shutdown()

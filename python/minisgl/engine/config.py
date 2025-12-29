@@ -17,6 +17,7 @@ class EngineConfig:
     model_path: str
     tp_info: DistributedInfo
     dtype: torch.dtype
+    device: str = "auto"
     max_running_req: int = 256
     attention_backend: str = "auto"
     cuda_graph_bs: List[int] | None = None
@@ -28,6 +29,7 @@ class EngineConfig:
     use_pynccl: bool = True
     max_seq_len_override: int | None = None
     num_page_override: int | None = None  # if not None, will override the number of pages
+    max_memory_imbalance: int = 2 * 1024 * 1024 * 1024  # 2GB
 
     @cached_property
     def hf_config(self):
