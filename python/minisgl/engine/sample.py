@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, List
 
 import torch
 from minisgl.utils import is_sm90_supported, nvtx_annotate
+from minisgl import device as device_mod
 
 if TYPE_CHECKING:
     from minisgl.core import Batch
@@ -69,7 +70,7 @@ class Sampler:
 
     @nvtx_annotate("Sampler")
     def sample(self, logits: torch.Tensor, args: BatchSamplingArgs) -> torch.Tensor:
-        with torch.cuda.nvtx.range("Sampler"):
+        with device_mod.nvtx_range("Sampler"):
             if args.temperatures is None:  # greedy sampling
                 return torch.argmax(logits, dim=-1)
             return sample_impl(logits.float(), args.temperatures, args.top_k, args.top_p)

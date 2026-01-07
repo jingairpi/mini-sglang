@@ -14,6 +14,14 @@ Example:
 python -m minisgl --model "Qwen/Qwen3-0.6B" --shell
 ```
 
+## CPU Execution
+Mini-SGLang supports running on CPU for development and testing on macOS, Windows, and Linux. This mode uses native PyTorch operations and includes optimizations like:
+- **Optimized CPU RoPE and RMSNorm**.
+- **Radix Cache** support via JIT-compiled C++ kernels.
+- **Overlap Scheduling** (simulated).
+
+To enable CPU mode, use `--device cpu`. Note that tensor parallelism is not supported on CPU.
+
 ## Distributed Serving
 
 To scale performance across multiple GPUs, Mini-SGLang supports Tensor Parallelism (TP). You can enable distributed serving by specifying the number of GPUs with the `--tp n` argument, where `n` is the degree of parallelism.
