@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import tempfile
 from dataclasses import dataclass
 from typing import List, Tuple
 
@@ -17,6 +18,7 @@ class ServerArgs(SchedulerConfig):
     server_port: int = 1919
     num_tokenizer: int = 0
     silent_output: bool = False
+    device: str = "auto"
 
     @property
     def share_tokenizer(self) -> bool:
@@ -24,13 +26,13 @@ class ServerArgs(SchedulerConfig):
 
     @property
     def zmq_frontend_addr(self) -> str:
-        return "ipc:///tmp/minisgl_3" + self._unique_suffix
+        return f"ipc://{tempfile.gettempdir()}/minisgl_3" + self._unique_suffix
 
     @property
     def zmq_tokenizer_addr(self) -> str:
         if self.share_tokenizer:
             return self.zmq_detokenizer_addr
-        result = "ipc:///tmp/minisgl_4" + self._unique_suffix
+        result = f"ipc://{tempfile.gettempdir()}/minisgl_4" + self._unique_suffix
         assert result != self.zmq_detokenizer_addr
         return result
 
@@ -208,6 +210,14 @@ def parse_args(args: List[str], run_shell: bool = False) -> Tuple[ServerArgs, bo
         "--shell-mode",
         action="store_true",
         help="Run the server in shell mode.",
+    )
+
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="auto",
+        choices=["auto", "cuda", "cpu"],
+        help="The device to use.",
     )
 
     # Parse arguments

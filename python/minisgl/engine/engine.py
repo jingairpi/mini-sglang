@@ -8,7 +8,6 @@ from minisgl.attention import create_attention_backend
 from minisgl.core import Batch, Context, Req, set_global_ctx
 from minisgl.distributed import destroy_distributed, enable_pynccl_distributed, set_tp_info
 from minisgl.kvcache import create_kvcache
-from minisgl.layers import set_rope_device
 from minisgl.models import create_model, load_hf_weight
 from minisgl.moe import create_moe_backend
 from minisgl.utils import div_even, init_logger, torch_dtype
@@ -16,6 +15,7 @@ from minisgl.utils import div_even, init_logger, torch_dtype
 from .config import EngineConfig
 from .graph import GraphRunner, get_free_memory, mem_GB
 from .sample import BatchSamplingArgs, Sampler
+from minisgl import device as device_mod
 
 logger = init_logger(__name__)
 
@@ -23,7 +23,7 @@ logger = init_logger(__name__)
 class ForwardOutput(NamedTuple):
     next_tokens_gpu: torch.Tensor
     next_tokens_cpu: torch.Tensor
-    copy_done_event: torch.cuda.Event
+    copy_done_event: torch.cuda.Event | None
 
 
 def create_page_table(shape: Tuple[int, int], device: torch.device) -> torch.Tensor:
@@ -36,13 +36,19 @@ def _align_up_32(num: int) -> int:
 
 class Engine:
     def __init__(self, config: EngineConfig):
+        self.config = config
         self.model_config = config.model_config
         set_tp_info(rank=config.tp_info.rank, size=config.tp_info.size)
-        assert not torch.cuda.is_initialized()
-        self.device = torch.device(f"cuda:{config.tp_info.rank}")
-        torch.cuda.set_device(self.device)
-        self.stream = torch.cuda.Stream()
-        torch.cuda.set_stream(self.stream)
+        device_mod.set_device(config.device)
+        if device_mod.is_cuda():
+            assert not torch.cuda.is_initialized()
+            self.device = torch.device(f"cuda:{config.tp_info.rank}")
+            torch.cuda.set_device(self.device)
+            self.stream = torch.cuda.Stream()
+            torch.cuda.set_stream(self.stream)
+        else:
+            self.device = torch.device("cpu")
+            self.stream = None
         self.dtype = config.dtype
 
         self.tp_cpu_group = self._init_communication(config)
@@ -50,7 +56,6 @@ class Engine:
         logger.info_rank0(f"Free memory before loading model: {mem_GB(init_free_memory)}")
 
         # load model and determine number of pages
-        set_rope_device(self.device)
         with torch.device("meta"), torch_dtype(config.dtype):
             self.model = create_model(config.model_config)
         self.model.load_state_dict(self._load_weight_state_dict(config))
@@ -122,10 +127,11 @@ class Engine:
             )
             tp_cpu_group = torch.distributed.group.WORLD
             assert tp_cpu_group is not None
-            max_bytes = (
-                config.max_forward_len * config.model_config.hidden_size * self.dtype.itemsize
-            )
-            enable_pynccl_distributed(config.tp_info, tp_cpu_group, max_bytes)
+            if config.use_pynccl and not device_mod.is_cpu():
+                max_bytes = (
+                    config.max_forward_len * config.model_config.hidden_size * self.dtype.itemsize
+                )
+                enable_pynccl_distributed(config.tp_info, tp_cpu_group, max_bytes)
         else:
             torch.distributed.init_process_group(
                 backend="nccl",
@@ -173,17 +179,24 @@ class Engine:
 
     def _sync_get_memory(self) -> Tuple[int, int]:
         """Get the min and max free memory across TP ranks."""
-        torch.cuda.synchronize(self.device)
-        torch.cuda.empty_cache()
-        torch.cuda.reset_peak_memory_stats(self.device)
-        free_memory = get_free_memory(self.device)
+        if device_mod.is_cuda():
+            torch.cuda.synchronize(self.device)
+            torch.cuda.empty_cache()
+            torch.cuda.reset_peak_memory_stats(self.device)
+            free_memory = get_free_memory(self.device)
+        else:
+            # For CPU, we just return available system memory or a large number
+            # Using psutil would be better but let's just delegate to device_mod
+            free_memory = device_mod.mem_get_info()[0]
+
         free_mem_tensor = torch.tensor([free_memory, -free_memory], device="cpu", dtype=torch.int64)
-        torch.distributed.all_reduce(
-            free_mem_tensor, op=torch.distributed.ReduceOp.MIN, group=self.tp_cpu_group
-        )
+        if torch.distributed.is_initialized():
+            torch.distributed.all_reduce(
+                free_mem_tensor, op=torch.distributed.ReduceOp.MIN, group=self.tp_cpu_group
+            )
         min_free_memory = int(free_mem_tensor[0].item())
         max_free_memory = -int(free_mem_tensor[1].item())
-        if max_free_memory - min_free_memory > 2 * 1024 * 1024 * 1024:
+        if max_free_memory - min_free_memory > self.config.max_memory_imbalance:
             logger.error(
                 f"Memory across TP ranks are imbalanced:"
                 f" min {mem_GB(min_free_memory)}, max {mem_GB(max_free_memory)}"
@@ -193,7 +206,8 @@ class Engine:
         return min_free_memory, max_free_memory
 
     def forward_batch(self, batch: Batch, args: BatchSamplingArgs) -> ForwardOutput:
-        assert torch.cuda.current_stream() == self.stream
+        if self.stream is not None:
+            assert torch.cuda.current_stream() == self.stream
         with self.ctx.forward_batch(batch):
             if self.graph_runner.can_use_cuda_graph(batch):
                 logits = self.graph_runner.replay(batch)
@@ -205,8 +219,11 @@ class Engine:
 
         next_tokens_gpu = self.sampler.sample(logits[: batch.size], args).to(torch.int32)
         next_tokens_cpu = next_tokens_gpu.to("cpu", non_blocking=True)
-        copy_done_event = torch.cuda.Event()
-        copy_done_event.record(self.stream)
+        if device_mod.is_cuda():
+            copy_done_event = torch.cuda.Event()
+            copy_done_event.record(self.stream)
+        else:
+            copy_done_event = None
         return ForwardOutput(next_tokens_gpu, next_tokens_cpu, copy_done_event)
 
     def shutdown(self) -> None:

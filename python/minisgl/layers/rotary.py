@@ -7,6 +7,45 @@ from typing import Any, Callable, Dict, Tuple
 import torch
 
 from .base import StateLessOP
+from minisgl import device as device_mod
+
+
+def _cpu_rope_inplace(
+    positions: torch.Tensor,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    head_size: int,
+    cos_sin_cache: torch.Tensor,
+    is_neox: bool = True,
+) -> None:
+    """CPU implementation of RoPE. Applies rotary embedding in-place.
+    
+    Note: is_neox parameter is kept for API compatibility with flashinfer.
+    """
+    num_tokens = query.shape[0]
+    num_q_heads = query.shape[1] // head_size
+    num_k_heads = key.shape[1] // head_size
+    
+    # Reshape to [num_tokens, num_heads, head_size]
+    q = query.view(num_tokens, num_q_heads, head_size)
+    k = key.view(num_tokens, num_k_heads, head_size)
+    
+    # Get cos/sin for positions
+    cos_sin = cos_sin_cache[positions]
+    half_dim = head_size // 2
+    cos = cos_sin[..., :half_dim].unsqueeze(1)
+    sin = cos_sin[..., half_dim:].unsqueeze(1)
+    
+    # Apply RoPE rotation
+    q1, q2 = q[..., :half_dim], q[..., half_dim:]
+    k1, k2 = k[..., :half_dim], k[..., half_dim:]
+    
+    q_rotated = torch.cat([q1 * cos - q2 * sin, q2 * cos + q1 * sin], dim=-1)
+    k_rotated = torch.cat([k1 * cos - k2 * sin, k2 * cos + k1 * sin], dim=-1)
+    
+    # Write back flattened
+    query.copy_(q_rotated.view(num_tokens, -1))
+    key.copy_(k_rotated.view(num_tokens, -1))
 
 
 class RotaryEmbedding(StateLessOP):
@@ -32,9 +71,11 @@ class RotaryEmbedding(StateLessOP):
         self._cos_sin_cache = torch.cat((cos, sin), dim=-1)
         assert self.head_size in [64, 128, 256, 512]
 
-        from flashinfer import apply_rope_with_cos_sin_cache_inplace
-
-        self.apply_rope_with_cos_sin_cache_inplace = apply_rope_with_cos_sin_cache_inplace
+        if device_mod.is_cpu():
+            self.apply_rope_with_cos_sin_cache_inplace = _cpu_rope_inplace
+        else:
+            from flashinfer import apply_rope_with_cos_sin_cache_inplace
+            self.apply_rope_with_cos_sin_cache_inplace = apply_rope_with_cos_sin_cache_inplace
 
     def forward(
         self,
@@ -90,13 +131,6 @@ def _get_rope(
     raise ValueError(f"Unsupported {rope_scaling = }")
 
 
-_ROPE_DEVICE: torch.device | None = None
-
-
-def set_rope_device(device: torch.device):
-    global _ROPE_DEVICE
-    _ROPE_DEVICE = device
-
 
 @functools.cache
 def get_rope(
@@ -109,14 +143,10 @@ def get_rope(
     rope_map = dict(rope_scaling) if rope_scaling is not None else None
     t = torch.tensor([])
     if t.device == torch.device("meta"):
-        # we cannot use meta device for rope
-        if _ROPE_DEVICE is None:
-            raise RuntimeError(
-                "We cannot use meta device for rope. Please call set_rope_device() first."
-            )
-        with torch.device(_ROPE_DEVICE):
+        # Meta device cannot be used for rope; fall back to device_mod's device
+        with torch.device(device_mod.get_device()):
             return _get_rope(head_dim, rotary_dim, max_position, base, rope_map)
     return _get_rope(head_dim, rotary_dim, max_position, base, rope_map)
 
 
-__all__ = ["get_rope", "RotaryEmbedding", "set_rope_device"]
+__all__ = ["get_rope", "RotaryEmbedding"]
