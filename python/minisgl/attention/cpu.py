@@ -58,7 +58,6 @@ class CPUAttentionBackend(BaseAttnBackend):
         indices = torch.cat(indices_list).to(device)
 
         batch.attn_metadata = CPUAttnMetadata(
-            positions=make_positions(device, reqs),
             indices=indices,
             cu_seqlens=cu_seqlens,
             cu_extend_lens=cu_extend_lens,

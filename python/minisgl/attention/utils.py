@@ -21,7 +21,10 @@ class BaseCaptureData:
             cu_seqlens_q=torch.arange(0, max_bs + 1, dtype=torch.int32, device=device),
             page_table=torch.zeros((max_bs, max_seq_len), dtype=torch.int32, device=device),
             **kwargs,
-        )from typing import List
+        )
+
+
+from typing import List
 from minisgl.core import Req
 
 
