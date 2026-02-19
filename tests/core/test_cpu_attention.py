@@ -39,10 +39,13 @@ def test_cpu_attention_metadata_indices() -> None:
     class MockConfig:
         head_dim: int = 64
     
-    page_table = torch.zeros((2, 20), dtype=torch.int32)
+    from minisgl.core import Context, set_global_ctx
+    ctx = Context(page_size=1)
+    ctx.page_table = torch.zeros((2, 20), dtype=torch.int32)
+    set_global_ctx(ctx)
     kvcache: Any = None  # Not used, prepare_metadata only accesses page_table
     
-    backend = CPUAttentionBackend(MockConfig(), kvcache, page_table)
+    backend = CPUAttentionBackend(MockConfig(), kvcache)
     
     backend.prepare_metadata(batch)
     
@@ -62,3 +65,6 @@ def test_cpu_attention_metadata_indices() -> None:
     # Req 2: extends by 5, occupies 3,4,5,6,7. Last is 7.
     last_indices = meta.get_last_indices(bs=2)
     assert torch.equal(last_indices, torch.tensor([2, 7], dtype=torch.int32))
+    
+    import minisgl.core
+    minisgl.core._GLOBAL_CTX = None

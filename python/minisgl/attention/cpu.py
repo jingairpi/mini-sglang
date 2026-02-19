@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, List
 import torch
 import torch.nn.functional as F
 from minisgl.device import get_device
-from minisgl.core import Batch
+from minisgl.core import Batch, get_global_ctx
 from minisgl.attention.base import BaseAttnBackend, BaseAttnMetadata
 from minisgl.attention.utils import make_positions
 
@@ -33,10 +33,9 @@ class CPUAttentionBackend(BaseAttnBackend):
     Handles GQA via head expansion. CUDA graph methods are no-ops on CPU.
     """
     
-    def __init__(self, config: ModelConfig, kvcache: BaseKVCache, page_table: torch.Tensor):
+    def __init__(self, config: ModelConfig, kvcache: BaseKVCache):
         self.config = config
         self.kvcache = kvcache
-        self.page_table = page_table
         self.dim = config.head_dim
 
     def prepare_metadata(self, batch: Batch) -> None:
@@ -52,9 +51,10 @@ class CPUAttentionBackend(BaseAttnBackend):
         cu_extend_lens = torch.tensor([0] + extend_lens, dtype=torch.int32, device=device).cumsum(0)
 
         # Flatten page indices
+        page_table = get_global_ctx().page_table
         indices_list = []
         for req in reqs:
-            indices_list.append(self.page_table[req.table_idx, : req.device_len])
+            indices_list.append(page_table[req.table_idx, : req.device_len])
         indices = torch.cat(indices_list).to(device)
 
         batch.attn_metadata = CPUAttnMetadata(
