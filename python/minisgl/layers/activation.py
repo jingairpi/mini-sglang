@@ -25,9 +25,17 @@ def silu_and_mul(x: torch.Tensor, out: torch.Tensor | None = None) -> torch.Tens
 
 
 def gelu_and_mul(x: torch.Tensor, out: torch.Tensor | None = None):
-    from flashinfer import gelu_and_mul
+    if device_mod.is_cpu():
+        # CPU fallback using PyTorch
+        gate, up = x.chunk(2, dim=-1)
+        if out is not None:
+            torch.mul(F.gelu(gate), up, out=out)
+            return out
+        return F.gelu(gate) * up
+    else:
+        from flashinfer import gelu_and_mul
 
-    return gelu_and_mul(x, out=out)
+        return gelu_and_mul(x, out=out)
 
 
 __all__ = ["silu_and_mul", "gelu_and_mul"]

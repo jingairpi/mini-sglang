@@ -190,14 +190,7 @@ class Scheduler(SchedulerIOMixin):
         batch.positions = _make_positions(batch, self.device)
         input_mapping = _make_input_tuple(batch, self.device)
         write_mapping = _make_write_tuple(batch, self.device)
-        # allocate pages
-        padding_size = batch.padded_size - batch.size
-        needed_tokens = len(batch.positions) - padding_size  # unpadded tokens
-        out_loc = self.cache_manager.allocate(needed_tokens)
-        if padding_size > 0:
-            out_loc = F.pad(out_loc, (0, padding_size), value=self.engine.dummy_loc)
-        self.page_table[input_mapping] = out_loc
-        batch.out_loc = out_loc
+        batch.out_loc = self.page_table[input_mapping]
         self.engine.attn_backend.prepare_metadata(batch)
         return ForwardInput(
             batch=batch,

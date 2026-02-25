@@ -240,11 +240,14 @@ def _adjust_config(config: EngineConfig):
         object.__setattr__(config, attr, value)
 
     if config.attention_backend == "auto":
-        backend = "trtllm" if is_sm100_supported() else ("fa,fi" if is_sm90_supported() else "fi")
+        if config.device == "cpu":
+            backend = "cpu"
+        else:
+            backend = "trtllm" if is_sm100_supported() else ("fa,fi" if is_sm90_supported() else "fi")
         override("attention_backend", backend)
         logger.info_rank0(f"Auto-selected attention backend: {config.attention_backend}")
 
-    if "trtllm" in config.attention_backend and config.page_size not in [16, 32, 64]:
+    if config.device != "cpu" and "trtllm" in config.attention_backend and config.page_size not in [16, 32, 64]:
         override("page_size", 64)
         logger.warning_rank0("Page size is overridden to 64 for TRTLLM backend")
 
