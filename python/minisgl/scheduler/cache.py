@@ -7,6 +7,7 @@ import torch
 from minisgl.core import Req
 from minisgl.kvcache import BaseCacheHandle, create_cache_manager
 from minisgl.utils import align_down, div_ceil
+from minisgl import device as device_mod
 
 if TYPE_CHECKING:
     from .utils import PendingReq
@@ -116,8 +117,9 @@ def _write_page_table(
     page_size: int,
 ) -> None:
     needed_tokens = len(allocated)
-    table_idx_host = torch.empty(needed_tokens, dtype=torch.int64, pin_memory=True)
-    positions_host = torch.empty(needed_tokens, dtype=torch.int64, pin_memory=True)
+    pin_memory = not device_mod.is_cpu()
+    table_idx_host = torch.empty(needed_tokens, dtype=torch.int64, pin_memory=pin_memory)
+    positions_host = torch.empty(needed_tokens, dtype=torch.int64, pin_memory=pin_memory)
     offset = 0
     for table_idx, first_page, last_page in allocation_info:
         first_pos, last_pos = first_page * page_size, last_page * page_size

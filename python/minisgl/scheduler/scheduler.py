@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 from typing import TYPE_CHECKING, List, NamedTuple, NoReturn, Set, Tuple, TypeAlias
 
 import torch
+import torch.nn.functional as F
 from minisgl.core import Batch, Req
 from minisgl.env import ENV
 from minisgl.message import (
@@ -14,6 +16,7 @@ from minisgl.message import (
     UserMsg,
 )
 from minisgl.utils import init_logger, load_tokenizer
+from minisgl import device as device_mod
 
 from .cache import CacheManager
 from .config import SchedulerConfig
@@ -29,6 +32,42 @@ if TYPE_CHECKING:
 logger = init_logger(__name__)
 
 Indice2D: TypeAlias = Tuple[torch.Tensor, torch.Tensor]
+
+
+def _make_2d_indices(table_2d: torch.Tensor, ranges: List[Tuple[int, int, int]]) -> torch.Tensor:
+    """
+    Return the 1D indices for the given 2D table and ranges.
+
+    Example: The underlying indices of a 2D table (3, 4) are:
+        [[ 0,  1,  2,  3],
+         [ 4,  5,  6,  7],
+         [ 8,  9, 10, 11]]
+    For ranges [(0, 1, 3), (2, 0, 2)], the returned indices are [1, 2, 8, 9].
+
+    Args:
+        table_2d (torch.Tensor): The 2D table tensor.
+        ranges (List[Tuple[int, int, int]]): A list of tuples (entry, begin, end),
+            where `entry` is the row index in the 2D table, and `begin` and `end`
+            specify the range of column indices to include.
+    Returns:
+        torch.Tensor: A 1D tensor of indices.
+    """
+    assert table_2d.dim() == 2 and table_2d.is_contiguous()
+    STRIDE = table_2d.stride(0)
+    needed_size = sum(end - begin for _, begin, end in ranges)
+    pin_memory = not device_mod.is_cpu()
+    indices_host = torch.empty(needed_size, dtype=torch.int32, pin_memory=pin_memory)
+    offset = 0
+    for entry, begin, end in ranges:
+        length = end - begin
+        offset += length
+        torch.arange(
+            begin + entry * STRIDE,
+            end + entry * STRIDE,
+            dtype=torch.int32,
+            out=indices_host[offset - length : offset],
+        )
+    return indices_host.to(table_2d.device, non_blocking=True)
 
 
 # For overlap scheduling, we also need to cache some other data to avoid IMA
@@ -52,9 +91,13 @@ class Scheduler(SchedulerIOMixin):
 
         # use another stream to overlap metadata processing with computation
         self.device = self.engine.device
-        self.stream = torch.cuda.Stream(device=self.device)
-        self.engine_stream_ctx = torch.cuda.stream(self.engine.stream)
-        torch.cuda.set_stream(self.stream)
+        if device_mod.is_cuda():
+            self.stream = torch.cuda.Stream(device=self.device)
+            self.engine_stream_ctx = torch.cuda.stream(self.engine.stream)
+            torch.cuda.set_stream(self.stream)
+        else:
+            self.stream = None
+            self.engine_stream_ctx = nullcontext()
 
         # initialize other managers
         self.table_manager = TableManager(config.max_running_req, self.engine.page_table)
@@ -74,6 +117,7 @@ class Scheduler(SchedulerIOMixin):
         self.page_table = self.engine.page_table
         self.page_size = config.page_size
         self.token_pool = self.table_manager.token_pool
+        self.token_pool_flat = self.token_pool.view(-1)  # Pre-computed for hot path
         self.prefill_budget = config.max_extend_tokens
 
     def _process_last_data(self, last_data: ForwardData | None) -> None:
@@ -81,7 +125,8 @@ class Scheduler(SchedulerIOMixin):
             return
 
         batch, (_, next_tokens_cpu, copy_done) = last_data[0].batch, last_data[1]
-        copy_done.synchronize()
+        if copy_done is not None:
+            copy_done.synchronize()
         reply: List[DetokenizeMsg] = []
         new_finished_reqs: Set[Req] = set()
         with self.cache_manager.lazy_free_region():
@@ -162,6 +207,7 @@ class Scheduler(SchedulerIOMixin):
         )
         return self._prepare_batch(batch) if batch else None
 
+
     def _forward(self, forward_input: ForwardInput) -> ForwardOutput:
         batch, sample_args, input_mapping, output_mapping = forward_input
         batch.input_ids = self.token_pool[input_mapping]
@@ -196,7 +242,8 @@ class Scheduler(SchedulerIOMixin):
         ongoing_data = None
         if forward_input is not None:
             with self.engine_stream_ctx:  # run the batch in the engine's stream
-                self.engine.stream.wait_stream(self.stream)
+                if self.stream:
+                    self.engine.stream.wait_stream(self.stream)
                 ongoing_data = (forward_input, self._forward(forward_input))
 
         self._process_last_data(last_data)
@@ -216,9 +263,10 @@ class Scheduler(SchedulerIOMixin):
 
     @torch.inference_mode()
     def run_forever(self) -> NoReturn:
-        if ENV.DISABLE_OVERLAP_SCHEDULING:
+        if ENV.DISABLE_OVERLAP_SCHEDULING or self.stream is None:
             with self.engine_stream_ctx:
-                self.engine.stream.wait_stream(self.stream)
+                if self.stream:
+                    self.engine.stream.wait_stream(self.stream)
                 while True:
                     self.normal_loop()
         else:
@@ -228,14 +276,16 @@ class Scheduler(SchedulerIOMixin):
                 data = self.overlap_loop(data)
 
     def shutdown(self) -> None:
-        torch.cuda.synchronize(self.device)
+        if device_mod.is_cuda():
+            torch.cuda.synchronize(self.device)
         self.sync_all_ranks()
         self.engine.shutdown()
 
 
 def _make_positions(batch: Batch, device: torch.device) -> torch.Tensor:
     needed_size = sum(r.extend_len for r in batch.padded_reqs)
-    indices_host = torch.empty(needed_size, dtype=torch.int32, pin_memory=True)
+    pin_memory = not device_mod.is_cpu()
+    indices_host = torch.empty(needed_size, dtype=torch.int32, pin_memory=pin_memory)
     offset = 0
     for req in batch.padded_reqs:
         length = req.extend_len
@@ -250,7 +300,8 @@ def _make_positions(batch: Batch, device: torch.device) -> torch.Tensor:
 
 
 def _make_input_tuple(batch: Batch, device: torch.device) -> Indice2D:
-    mapping_host = torch.empty(len(batch.positions), dtype=torch.int64, pin_memory=True)
+    pin_memory = not device_mod.is_cpu()
+    mapping_host = torch.empty(len(batch.positions), dtype=torch.int64, pin_memory=pin_memory)
     offset = 0
     for req in batch.padded_reqs:
         length = req.extend_len
@@ -261,7 +312,8 @@ def _make_input_tuple(batch: Batch, device: torch.device) -> Indice2D:
 
 def _make_write_tuple(batch: Batch, device: torch.device) -> Indice2D:
     mapping_list = [req.table_idx for req in batch.reqs]
-    mapping_host = torch.tensor(mapping_list, dtype=torch.int64, pin_memory=True)
+    pin_memory = not device_mod.is_cpu()
+    mapping_host = torch.tensor(mapping_list, dtype=torch.int64, pin_memory=pin_memory)
     write_list = [(req.device_len if req.can_decode else -1) for req in batch.reqs]
-    write_host = torch.tensor(write_list, dtype=torch.int64, pin_memory=True)
+    write_host = torch.tensor(write_list, dtype=torch.int64, pin_memory=pin_memory)
     return mapping_host.to(device, non_blocking=True), write_host.to(device, non_blocking=True)

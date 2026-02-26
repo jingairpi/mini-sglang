@@ -4,12 +4,13 @@ import functools
 from typing import TYPE_CHECKING, Tuple
 
 from .utils import KernelConfig, load_jit, make_cpp_args
+from .constants import DEFAULT_KERNEL_CONFIG
 
 if TYPE_CHECKING:
-    import torch
     from tvm_ffi import Module
 
-DEFAULT_INDEX_KERNEL_CONFIG = KernelConfig(num_threads=128, max_occupancy=1, use_pdl=False)
+import torch
+from minisgl.device import is_cpu
 
 
 @functools.cache
@@ -17,7 +18,7 @@ def _jit_index_module(
     element_size: int,
     *,
     num_splits: int = 1,
-    config: KernelConfig = DEFAULT_INDEX_KERNEL_CONFIG,
+    config: KernelConfig = DEFAULT_KERNEL_CONFIG,
 ) -> Module:
     args = make_cpp_args(element_size, num_splits, *config)
     return load_jit(
@@ -35,8 +36,27 @@ def indexing(
     output: torch.Tensor | None = None,
     vocab_range: Tuple[int, int] | None = None,  # (start, length)
 ) -> torch.Tensor:
+    """Perform indexed lookup into weights tensor (embedding).
+    
+    On CPU, uses PyTorch's F.embedding. On CUDA, uses JIT-compiled kernel.
+    Supports vocab-parallel mode via vocab_range for tensor parallelism.
+    """
     if output is None:
         output = weights.new_empty(indices.shape[0], weights.shape[1])
+
+    if is_cpu():
+        # CPU fallback for embedding lookup
+        if vocab_range is not None:
+            # Vocab-parallel mode: zero-init for all-reduce, gather only local shard
+            start, length = vocab_range
+            mask = (indices >= start) & (indices < (start + length))
+            local_indices = indices[mask] - start
+            output.zero_()
+            output[mask] = weights[local_indices]
+        else:
+            # Standard embedding lookup
+            output.copy_(torch.nn.functional.embedding(indices, weights))
+        return output
 
     element_size = weights.shape[1] * weights.element_size()
     if element_size % 2048 == 0:
