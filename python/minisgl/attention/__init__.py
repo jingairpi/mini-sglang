@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
-from minisgl.utils import Registry, init_logger, is_sm90_supported, is_sm100_supported
-from minisgl import device as device_mod
+from minisgl.utils import Registry, init_logger
 
 from .base import BaseAttnBackend, BaseAttnMetadata, HybridBackend
 
@@ -27,17 +26,6 @@ def create_trtllm_backend(config: ModelConfig, kvcache: BaseKVCache):
 
     return TensorRTLLMBackend(config, kvcache)
 
-def resolve_auto_backend() -> str:
-    """Determine the best attention backend based on the GPU architecture and model."""
-    if device_mod.is_cpu():
-        return "cpu"
-    if is_sm100_supported():  # blackwell
-        return "fi"
-    elif is_sm90_supported():  # hopper
-        return "fa,fi"
-    else:  # pre-hopper
-        return "fi"
-
 
 @SUPPORTED_ATTENTION_BACKENDS.register("fi")
 def create_fi_backend(config: ModelConfig, kvcache: BaseKVCache):
@@ -51,13 +39,6 @@ def create_fa_backend(config: ModelConfig, kvcache: BaseKVCache):
     from .fa import FlashAttentionBackend
 
     return FlashAttentionBackend(config, kvcache)
-
-
-@SUPPORTED_ATTENTION_BACKENDS.register("cpu")
-def create_cpu_backend(config: ModelConfig, kvcache: BaseKVCache):
-    from .cpu import CPUAttentionBackend
-
-    return CPUAttentionBackend(config, kvcache)
 
 
 def validate_attn_backend(backend: str, allow_auto: bool = True):

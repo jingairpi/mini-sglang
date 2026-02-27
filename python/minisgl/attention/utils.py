@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 
 import torch
-from minisgl import device as device_mod
 
 
 @dataclass
@@ -22,24 +21,3 @@ class BaseCaptureData:
             page_table=torch.zeros((max_bs, max_seq_len), dtype=torch.int32, device=device),
             **kwargs,
         )
-
-
-from typing import List
-from minisgl.core import Req
-
-
-def make_positions(device: torch.device, reqs: List[Req]) -> torch.Tensor:
-    needed_size = sum(req.extend_len for req in reqs)
-    pin_memory = not device_mod.is_cpu()
-    indices_host = torch.empty(needed_size, dtype=torch.int32, pin_memory=pin_memory)
-    offset = 0
-    for req in reqs:
-        length = req.extend_len
-        torch.arange(
-            req.cached_len,
-            req.device_len,
-            dtype=torch.int32,
-            out=indices_host[offset : offset + length],
-        )
-        offset += length
-    return indices_host.to(device, non_blocking=True)

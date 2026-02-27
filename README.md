@@ -24,9 +24,7 @@ Mini-SGLang is a compact implementation of [SGLang](https://github.com/sgl-proje
 
 ## 🚀 Quick Start
 
-> **⚠️ Platform Support**: Mini-SGLang is optimized for **Linux** with CUDA GPUs.
->
-> **CPU Support**: It also supports generic CPU execution on **macOS**, **Windows**, and **Linux**. Use `--device cpu` to enable this mode. Note that CPU execution requires a C++ compiler (e.g., `g++`, `clang`, or MSVC) for JIT compilation of internal kernels.
+> **⚠️ Platform Support**: Mini-SGLang currently supports **Linux only** (x86_64 and aarch64). Windows and macOS are not supported due to dependencies on Linux-specific CUDA kernels (`sgl-kernel`, `flashinfer`). We recommend using [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install) on Windows or Docker for cross-platform compatibility.
 
 ### 1. Environment Setup
 
@@ -122,9 +120,6 @@ python -m minisgl --model "Qwen/Qwen3-0.6B"
 
 # Deploy meta-llama/Llama-3.1-70B-Instruct on 4 GPUs with Tensor Parallelism, on port 30000
 python -m minisgl --model "meta-llama/Llama-3.1-70B-Instruct" --tp 4 --port 30000
-
-# Deploy on CPU (macOS/Windows/Linux)
-python -m minisgl --model "Qwen/Qwen3-0.6B" --device cpu
 ```
 
 Once the server is running, you can send requests using standard tools like `curl` or any OpenAI-compatible client.

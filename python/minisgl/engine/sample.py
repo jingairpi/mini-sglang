@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING, List
 
 import torch
 from minisgl.utils import is_sm90_supported, nvtx_annotate
-from minisgl import device as device_mod
 
 if TYPE_CHECKING:
     from minisgl.core import Batch
@@ -28,45 +27,22 @@ def sample_impl(
     top_k: torch.Tensor | int | None,
     top_p: torch.Tensor | float | None,
 ) -> torch.Tensor:
-    if device_mod.is_cpu():
-        # CPU implementation using native PyTorch
-        probs = torch.softmax(logits / temperatures.unsqueeze(-1), dim=-1)
-        if top_k is not None or top_p is not None:
-            # Note: naive top_k/top_p is slow on CPU, but this is a fallback
-            # For brevity and correctness, we'll use a simple implementation if needed,
-            # or just multinomial if standard.
-            # Actually, most CPU users will use greedy.
-            if top_k is not None:
-                if isinstance(top_k, torch.Tensor):
-                    # Multinomial doesn't support per-row top_k easily without masking
-                    pass # TODO: implement if needed
-                else:
-                    v, i = torch.topk(probs, top_k)
-                    probs.zero_().scatter_(-1, i, v)
-                    probs.div_(probs.sum(-1, keepdim=True))
-            
-            if top_p is not None:
-                # TODO: add top_p masking if needed
-                pass
-        
-        return torch.multinomial(probs, num_samples=1).squeeze(-1)
-    else:
-        import flashinfer.sampling as sampling
+    import flashinfer.sampling as sampling
 
-        probs = sampling.softmax(logits, temperatures, enable_pdl=is_sm90_supported())
-        if top_k is None and top_p is None:
-            return sampling.sampling_from_probs(probs)
+    probs = sampling.softmax(logits, temperatures, enable_pdl=is_sm90_supported())
+    if top_k is None and top_p is None:
+        return sampling.sampling_from_probs(probs)
 
-        if top_p is None:
-            assert top_k is not None
-            return sampling.top_k_sampling_from_probs(probs, top_k)
+    if top_p is None:
+        assert top_k is not None
+        return sampling.top_k_sampling_from_probs(probs, top_k)
 
-        if top_k is None:
-            assert top_p is not None
-            return sampling.top_p_sampling_from_probs(probs, top_p)
+    if top_k is None:
+        assert top_p is not None
+        return sampling.top_p_sampling_from_probs(probs, top_p)
 
-        assert top_k is not None and top_p is not None
-        return sampling.top_k_top_p_sampling_from_probs(probs, top_k, top_p)
+    assert top_k is not None and top_p is not None
+    return sampling.top_k_top_p_sampling_from_probs(probs, top_k, top_p)
 
 
 @dataclass
@@ -93,7 +69,7 @@ class Sampler:
 
     @nvtx_annotate("Sampler")
     def sample(self, logits: torch.Tensor, args: BatchSamplingArgs) -> torch.Tensor:
-        with device_mod.nvtx_range("Sampler"):
+        with torch.cuda.nvtx.range("Sampler"):
             if args.temperatures is None:  # greedy sampling
                 return torch.argmax(logits, dim=-1)
             return sample_impl(logits.float(), args.temperatures, args.top_k, args.top_p)
