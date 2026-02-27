@@ -11,7 +11,7 @@ from .linear import (
 )
 from .moe import MoELayer
 from .norm import RMSNorm, RMSNormFused
-from .rotary import get_rope
+from .rotary import get_rope, set_rope_device
 
 __all__ = [
     "silu_and_mul",
@@ -29,6 +29,7 @@ __all__ = [
     "RMSNorm",
     "RMSNormFused",
     "get_rope",
+    "set_rope_device",
     "LinearReplicated",
     "MoELayer",
 ]
