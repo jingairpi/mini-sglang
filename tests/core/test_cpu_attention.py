@@ -10,7 +10,7 @@ from minisgl.attention.cpu import CPUAttentionBackend, CPUAttnMetadata
 
 
 @dataclass
-class MockReq:
+class _Req:
     device_len: int
     extend_len: int
     table_idx: int = 0
@@ -21,31 +21,24 @@ class MockReq:
 
 
 @dataclass
-class MockBatch:
+class _Batch:
     padded_reqs: list[Any]
     attn_metadata: Any = None
 
 
 def test_cpu_attention_metadata_indices() -> None:
-    """Test that get_last_indices uses extend_len correctly."""
+    req1 = _Req(device_len=10, extend_len=3, table_idx=0)
+    req2 = _Req(device_len=5, extend_len=5, table_idx=1)
 
-    # Scene: 2 requests
-    # Req 1: total 10 tokens, but this step extending by 3 (prefix match 7)
-    # Req 2: total 5 tokens, this step extending by 5 (fresh)
+    batch = _Batch(padded_reqs=[req1, req2])
 
-    req1 = MockReq(device_len=10, extend_len=3, table_idx=0)
-    req2 = MockReq(device_len=5, extend_len=5, table_idx=1)
-
-    batch = MockBatch(padded_reqs=[req1, req2])
-
-    # Mock components for backend
     @dataclass
-    class MockConfig:
+    class Config:
         head_dim: int = 64
 
     page_table = torch.zeros((2, 20), dtype=torch.int32)
     backend = CPUAttentionBackend(
-        MockConfig(),
+        Config(),
         kvcache=object(),
         page_table=page_table,
         device=torch.device("cpu"),
@@ -56,17 +49,9 @@ def test_cpu_attention_metadata_indices() -> None:
     meta = batch.attn_metadata
     assert isinstance(meta, CPUAttnMetadata)
 
-    # Verify cu_extend_lens
-    # [0, 3, 8]
     assert torch.equal(meta.cu_extend_lens, torch.tensor([0, 3, 8], dtype=torch.int32))
-
-    # Verify cu_seqlens (total length)
-    # [0, 10, 15]
     assert torch.equal(meta.cu_seqlens, torch.tensor([0, 10, 15], dtype=torch.int32))
 
-    # Verify get_last_indices uses extend_lens (new tokens only)
-    # Req 1: extends by 3, occupies 0,1,2. Last is 2.
-    # Req 2: extends by 5, occupies 3,4,5,6,7. Last is 7.
     last_indices = meta.get_last_indices(bs=2)
     assert torch.equal(last_indices, torch.tensor([2, 7], dtype=torch.int32))
 
@@ -74,7 +59,7 @@ def test_cpu_attention_metadata_indices() -> None:
 def test_cpu_attention_forward_handles_paged_cache_and_gqa() -> None:
     """CPU attention should flatten paged KV cache storage and expand KV heads for GQA."""
 
-    class MockKVCache:
+    class KVCache:
         def __init__(self) -> None:
             self.k = torch.zeros((2, 2, 1, 2))
             self.v = torch.zeros((2, 2, 1, 2))
@@ -95,8 +80,8 @@ def test_cpu_attention_forward_handles_paged_cache_and_gqa() -> None:
             return self.v
 
     page_table = torch.tensor([[0, 1, 2, 3]], dtype=torch.int32)
-    kvcache = MockKVCache()
-    req = MockReq(device_len=3, extend_len=3, table_idx=0)
+    kvcache = KVCache()
+    req = _Req(device_len=3, extend_len=3, table_idx=0)
     batch = SimpleNamespace(
         reqs=[req],
         padded_reqs=[req],
@@ -138,7 +123,7 @@ def test_cpu_attention_forward_handles_paged_cache_and_gqa() -> None:
 def test_cpu_attention_uses_rank_local_kv_heads_from_cache_shape() -> None:
     """CPU attention must read TP-sharded KV cache with the local KV head count."""
 
-    class MockKVCache:
+    class KVCache:
         def __init__(self) -> None:
             self.k = torch.zeros((2, 2, 2, 2))
             self.v = torch.zeros((2, 2, 2, 2))
@@ -158,7 +143,7 @@ def test_cpu_attention_uses_rank_local_kv_heads_from_cache_shape() -> None:
             _ = layer_id
             return self.v
 
-    req = MockReq(device_len=4, extend_len=4, table_idx=0)
+    req = _Req(device_len=4, extend_len=4, table_idx=0)
     batch = SimpleNamespace(
         reqs=[req],
         padded_reqs=[req],
@@ -167,7 +152,7 @@ def test_cpu_attention_uses_rank_local_kv_heads_from_cache_shape() -> None:
     )
     backend = CPUAttentionBackend(
         SimpleNamespace(head_dim=2, num_kv_heads=4),
-        kvcache=MockKVCache(),
+        kvcache=KVCache(),
         page_table=torch.tensor([[0, 1, 2, 3]], dtype=torch.int32),
         device=torch.device("cpu"),
     )

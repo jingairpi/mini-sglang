@@ -1,11 +1,4 @@
-"""Integration test for CPU execution mode.
-
-This test verifies end-to-end inference on CPU by spawning a scheduler
-subprocess and sending requests through ZMQ queues.
-
-Run with: pytest tests/core/test_cpu_integration.py -v --timeout=120
-Or directly: python tests/core/test_cpu_integration.py
-"""
+"""CPU scheduler integration coverage with a generated local model."""
 
 from __future__ import annotations
 
@@ -30,12 +23,11 @@ logger = init_logger(__name__)
 
 
 def _scheduler_process(config: SchedulerConfig, queue: mp.Queue) -> None:
-    """Run scheduler in subprocess."""
     try:
         signal.signal(signal.SIGINT, signal.SIG_IGN)
-        logger.info("Initializing Scheduler in subprocess...")
+        logger.info("Initializing scheduler subprocess...")
         scheduler = Scheduler(config)
-        logger.info("Scheduler initialized. Signaling READY.")
+        logger.info("Scheduler subprocess ready.")
         queue.put("READY")
         scheduler.run_forever()
     except Exception as e:
@@ -54,7 +46,6 @@ def local_tiny_llama_path(tmp_path_factory: pytest.TempPathFactory) -> str:
 
 @pytest.fixture(scope="module")
 def cpu_scheduler(local_tiny_llama_path: str):
-    """Fixture that starts a CPU scheduler in a subprocess."""
     config = SchedulerConfig(
         model_path=local_tiny_llama_path,
         tp_info=DistributedInfo(0, 1),
@@ -66,7 +57,6 @@ def cpu_scheduler(local_tiny_llama_path: str):
         _unique_suffix=f".test_cpu_int.{os.getpid()}",
     )
 
-    # Start scheduler process
     ctx = mp.get_context("spawn")
     q = ctx.Queue()
     p = ctx.Process(target=_scheduler_process, args=(config, q))
@@ -79,7 +69,6 @@ def cpu_scheduler(local_tiny_llama_path: str):
         if msg != "READY":
             raise RuntimeError(f"Scheduler failed to start: {msg}")
 
-        # Create communication queues
         send_queue = ZmqPushQueue(
             config.zmq_backend_addr,
             create=False,
@@ -98,7 +87,6 @@ def cpu_scheduler(local_tiny_llama_path: str):
             "process": p,
         }
 
-        # Cleanup
         send_queue.put(ExitMsg())
 
     finally:
@@ -156,7 +144,6 @@ def _write_tiny_tokenizer(model_dir: Path) -> None:
 @pytest.mark.slow
 @pytest.mark.timeout(120)
 def test_cpu_single_request(cpu_scheduler):
-    """Test processing a single request on CPU."""
     send = cpu_scheduler["send"]
     recv = cpu_scheduler["recv"]
 
@@ -187,13 +174,10 @@ def test_cpu_single_request(cpu_scheduler):
 @pytest.mark.slow
 @pytest.mark.timeout(120)
 def test_cpu_prefix_caching(cpu_scheduler):
-    """Test that prefix caching works on CPU (two requests with shared prefix)."""
     send = cpu_scheduler["send"]
     recv = cpu_scheduler["recv"]
 
-    # Request 1: Prefix only
     ids1 = [101, 102, 103, 104]
-    # Request 2: Same prefix + extension (tests prefix cache hit)
     ids2 = [101, 102, 103, 104, 201, 202]
 
     for req_id, input_ids_list in enumerate([ids1, ids2], start=200):
@@ -218,8 +202,3 @@ def test_cpu_prefix_caching(cpu_scheduler):
                 break
 
         assert tokens_received >= 1
-
-
-# Allow running directly for debugging
-if __name__ == "__main__":
-    pytest.main([__file__, "-v", "--timeout=120"])
