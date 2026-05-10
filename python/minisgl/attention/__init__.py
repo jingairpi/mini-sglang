@@ -2,42 +2,79 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
-from minisgl.utils import Registry, init_logger
+import torch
+from minisgl import device as device_mod
+from minisgl.utils import Registry, init_logger, is_sm90_supported, is_sm100_supported
 
 from .base import BaseAttnBackend, BaseAttnMetadata, HybridBackend
 
 if TYPE_CHECKING:
+    from minisgl.kvcache import BaseKVCachePool
     from minisgl.models import ModelConfig
 
 logger = init_logger(__name__)
 
 
 class BackendCreator(Protocol):
-    def __call__(self, config: ModelConfig) -> BaseAttnBackend: ...
+    def __call__(
+        self,
+        config: ModelConfig,
+        *,
+        kvcache: BaseKVCachePool | None = None,
+        page_table: torch.Tensor | None = None,
+        device: torch.device | None = None,
+    ) -> BaseAttnBackend: ...
 
 
 SUPPORTED_ATTENTION_BACKENDS = Registry[BackendCreator]("Attention Backend")
 
 
 @SUPPORTED_ATTENTION_BACKENDS.register("trtllm")
-def create_trtllm_backend(config: ModelConfig):
+def create_trtllm_backend(config: ModelConfig, **_: object):
     from .trtllm import TensorRTLLMBackend
 
     return TensorRTLLMBackend(config)
 
 
+def resolve_auto_backend(device: torch.device) -> str:
+    """Determine the best attention backend based on the GPU architecture and model."""
+    if device_mod.is_cpu(device):
+        return "cpu"
+    if is_sm100_supported():  # blackwell
+        return "fi"
+    elif is_sm90_supported():  # hopper
+        return "fa,fi"
+    else:  # pre-hopper
+        return "fi"
+
+
 @SUPPORTED_ATTENTION_BACKENDS.register("fi")
-def create_fi_backend(config: ModelConfig):
+def create_fi_backend(config: ModelConfig, **_: object):
     from .fi import FlashInferBackend
 
     return FlashInferBackend(config)
 
 
 @SUPPORTED_ATTENTION_BACKENDS.register("fa")
-def create_fa_backend(config: ModelConfig):
+def create_fa_backend(config: ModelConfig, **_: object):
     from .fa import FlashAttentionBackend
 
     return FlashAttentionBackend(config)
+
+
+@SUPPORTED_ATTENTION_BACKENDS.register("cpu")
+def create_cpu_backend(
+    config: ModelConfig,
+    *,
+    kvcache: BaseKVCachePool | None = None,
+    page_table: torch.Tensor | None = None,
+    device: torch.device | None = None,
+):
+    from .cpu import CPUAttentionBackend
+
+    if kvcache is None or page_table is None or device is None:
+        raise ValueError("CPU attention backend requires explicit kvcache, page_table, and device.")
+    return CPUAttentionBackend(config, kvcache=kvcache, page_table=page_table, device=device)
 
 
 def validate_attn_backend(backend: str, allow_auto: bool = True):
@@ -52,6 +89,10 @@ def validate_attn_backend(backend: str, allow_auto: bool = True):
 def create_attention_backend(
     backend: str,
     config: ModelConfig,
+    *,
+    kvcache: BaseKVCachePool | None = None,
+    page_table: torch.Tensor | None = None,
+    device: torch.device | None = None,
 ) -> BaseAttnBackend:
     validate_attn_backend(backend, allow_auto=False)
     if "," in backend:
@@ -59,13 +100,19 @@ def create_attention_backend(
         p_backend, d_backend = backend.split(",", 1)
         if p_backend != d_backend:
             logger.info(f"Using hybrid attention backend: prefill={p_backend}, decode={d_backend}")
-            p_backend = create_attention_backend(p_backend, config)
-            d_backend = create_attention_backend(d_backend, config)
+            p_backend = create_attention_backend(
+                p_backend, config, kvcache=kvcache, page_table=page_table, device=device
+            )
+            d_backend = create_attention_backend(
+                d_backend, config, kvcache=kvcache, page_table=page_table, device=device
+            )
             return HybridBackend(p_backend, d_backend)
         backend = p_backend  # both are the same, fall through to single backend
         logger.warning(f"P/D attention backends are the same: {backend}, using single backend.")
 
-    return SUPPORTED_ATTENTION_BACKENDS[backend](config)
+    return SUPPORTED_ATTENTION_BACKENDS[backend](
+        config, kvcache=kvcache, page_table=page_table, device=device
+    )
 
 
 __all__ = [

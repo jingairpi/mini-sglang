@@ -27,21 +27,27 @@ dependencies = [
     "modelscope",
     "torch<2.10.0",
     "transformers>=4.56.0,<=4.57.3",
-    "flashinfer-python>=0.5.3",
     "pyzmq",
     "uvicorn",
     "fastapi",
     "prompt_toolkit",
     "openai",
     "apache-tvm-ffi>=0.1.4",
-    "sgl_kernel>=0.3.17.post1",
-    "quack-kernels",
+    "psutil",
 ]
 
 [project.optional-dependencies]
+cuda = [
+    "flashinfer-python>=0.5.3",
+    "ninja",
+    "nvidia-cutlass-dsl>=4.4.0",
+    "quack-kernels",
+    "sgl_kernel>=0.3.17.post1",
+]
 dev = [
     "pytest>=6.0",
     "pytest-cov>=2.0",
+    "pytest-timeout>=2.3.1",
     "black>=22.0",
     "flake8>=4.0",
     "mypy>=0.950",
@@ -114,6 +120,10 @@ addopts = [
     "--cov=minisgl",
     "--cov-report=term-missing",
     "--cov-report=html",
+]
+markers = [
+    "integration: marks tests as integration tests (require full scheduler startup)",
+    "slow: marks tests as slow (may require network/model downloads)",
 ]
 
 [tool.mypy]

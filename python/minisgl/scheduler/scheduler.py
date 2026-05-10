@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 from typing import TYPE_CHECKING, List, NamedTuple, NoReturn, Set, Tuple, TypeAlias
 
 import torch
+from minisgl import device as device_mod
 from minisgl.core import Batch, Req
 from minisgl.env import ENV
 from minisgl.message import (
@@ -50,9 +52,13 @@ class Scheduler(SchedulerIOMixin):
 
         # use another stream to overlap metadata processing with computation
         self.device = self.engine.device
-        self.stream = torch.cuda.Stream(device=self.device)
-        self.engine_stream_ctx = torch.cuda.stream(self.engine.stream)
-        torch.cuda.set_stream(self.stream)
+        if device_mod.is_cuda(self.device):
+            self.stream = torch.cuda.Stream(device=self.device)
+            self.engine_stream_ctx = torch.cuda.stream(self.engine.stream)
+            torch.cuda.set_stream(self.stream)
+        else:
+            self.stream = None
+            self.engine_stream_ctx = nullcontext()
 
         # initialize other managers
         self.table_manager = TableManager(config.max_running_req, self.engine.page_table)
@@ -99,7 +105,8 @@ class Scheduler(SchedulerIOMixin):
         ongoing_data = None
         if forward_input is not None:
             with self.engine_stream_ctx:  # run the batch in the engine's stream
-                self.engine.stream.wait_stream(self.stream)
+                if self.stream is not None:
+                    self.engine.stream.wait_stream(self.stream)
                 ongoing_data = (forward_input, self._forward(forward_input))
 
         self._process_last_data(last_data)
@@ -119,9 +126,10 @@ class Scheduler(SchedulerIOMixin):
 
     @torch.inference_mode()
     def run_forever(self) -> NoReturn:
-        if ENV.DISABLE_OVERLAP_SCHEDULING:
+        if ENV.DISABLE_OVERLAP_SCHEDULING or self.stream is None:
             with self.engine_stream_ctx:
-                self.engine.stream.wait_stream(self.stream)
+                if self.stream is not None:
+                    self.engine.stream.wait_stream(self.stream)
                 while True:
                     self.normal_loop()
         else:
@@ -131,7 +139,8 @@ class Scheduler(SchedulerIOMixin):
                 data = self.overlap_loop(data)
 
     def shutdown(self) -> None:
-        torch.cuda.synchronize(self.device)
+        if device_mod.is_cuda(self.device):
+            torch.cuda.synchronize(self.device)
         self.sync_all_ranks()
         self.engine.shutdown()
 
@@ -140,7 +149,8 @@ class Scheduler(SchedulerIOMixin):
             return
 
         batch, (_, next_tokens_cpu, copy_done) = last_data[0].batch, last_data[1]
-        copy_done.synchronize()
+        if copy_done is not None:
+            copy_done.synchronize()
         reply: List[DetokenizeMsg] = []
         new_finished_reqs: Set[Req] = set()
         with self.cache_manager.lazy_free_region():
@@ -228,14 +238,15 @@ class Scheduler(SchedulerIOMixin):
         batch, sample_args, input_mapping, output_mapping = forward_input
         batch.input_ids = self.token_pool[input_mapping]
         forward_output = self.engine.forward_batch(batch, sample_args)
-        self.token_pool[output_mapping] = forward_output.next_tokens_gpu
+        self.token_pool[output_mapping] = forward_output.next_tokens_device
         self.decode_manager.filter_reqs(forward_input.batch.reqs)
         return forward_output
 
 
 def _make_positions(batch: Batch, device: torch.device) -> torch.Tensor:
     needed_size = sum(r.extend_len for r in batch.padded_reqs)
-    indices_host = torch.empty(needed_size, dtype=torch.int32, pin_memory=True)
+    pin_memory = device_mod.supports_pinned_memory(device)
+    indices_host = torch.empty(needed_size, dtype=torch.int32, pin_memory=pin_memory)
     offset = 0
     for req in batch.padded_reqs:
         length = req.extend_len
@@ -250,7 +261,8 @@ def _make_positions(batch: Batch, device: torch.device) -> torch.Tensor:
 
 
 def _make_input_tuple(batch: Batch, device: torch.device) -> Indice2D:
-    mapping_host = torch.empty(len(batch.positions), dtype=torch.int64, pin_memory=True)
+    pin_memory = device_mod.supports_pinned_memory(device)
+    mapping_host = torch.empty(len(batch.positions), dtype=torch.int64, pin_memory=pin_memory)
     offset = 0
     for req in batch.padded_reqs:
         length = req.extend_len
@@ -261,7 +273,8 @@ def _make_input_tuple(batch: Batch, device: torch.device) -> Indice2D:
 
 def _make_write_tuple(batch: Batch, device: torch.device) -> Indice2D:
     mapping_list = [req.table_idx for req in batch.reqs]
-    mapping_host = torch.tensor(mapping_list, dtype=torch.int64, pin_memory=True)
+    pin_memory = device_mod.supports_pinned_memory(device)
+    mapping_host = torch.tensor(mapping_list, dtype=torch.int64, pin_memory=pin_memory)
     write_list = [(req.device_len if req.can_decode else -1) for req in batch.reqs]
-    write_host = torch.tensor(write_list, dtype=torch.int64, pin_memory=True)
+    write_host = torch.tensor(write_list, dtype=torch.int64, pin_memory=pin_memory)
     return mapping_host.to(device, non_blocking=True), write_host.to(device, non_blocking=True)

@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, List, Tuple
 
 import torch
 from minisgl.core import Batch, Req
+from minisgl.device import supports_pinned_memory
 from minisgl.utils import init_logger
 
 from .utils import PendingReq
@@ -57,7 +58,9 @@ class PrefillAdder:
         if cached_len > 0:  # NOTE: set the cached part
             device_ids = self.table_manager.token_pool[table_idx][:cached_len]
             page_entry = self.table_manager.page_table[table_idx][:cached_len]
-            device_ids.copy_(req.input_ids[:cached_len].pin_memory(), non_blocking=True)
+            device_ids.copy_(
+                _maybe_pin(req.input_ids[:cached_len], device_ids.device), non_blocking=True
+            )
             page_entry.copy_(handle.get_matched_indices())
 
         return handle, table_idx
@@ -78,7 +81,9 @@ class PrefillAdder:
         # NOTE: update the tokens ids only; new pages will be allocated in the scheduler
         _slice = slice(cached_len, cached_len + chunk_size)
         device_ids = self.table_manager.token_pool[table_idx, _slice]
-        device_ids.copy_(pending_req.input_ids[_slice].pin_memory(), non_blocking=True)
+        device_ids.copy_(
+            _maybe_pin(pending_req.input_ids[_slice], device_ids.device), non_blocking=True
+        )
         return CLS(
             input_ids=pending_req.input_ids[: cached_len + chunk_size],
             table_idx=table_idx,
@@ -160,3 +165,7 @@ class PrefillManager:
     @property
     def runnable(self) -> bool:
         return len(self.pending_list) > 0
+
+
+def _maybe_pin(tensor: torch.Tensor, target_device: torch.device) -> torch.Tensor:
+    return tensor.pin_memory() if supports_pinned_memory(target_device) else tensor

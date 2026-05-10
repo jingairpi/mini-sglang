@@ -24,7 +24,8 @@ Mini-SGLang is a compact implementation of [SGLang](https://github.com/sgl-proje
 
 ## 🚀 Quick Start
 
-> **⚠️ Platform Support**: Mini-SGLang currently supports **Linux only** (x86_64 and aarch64). Windows and macOS are not supported due to dependencies on Linux-specific CUDA kernels (`sgl-kernel`, `flashinfer`). We recommend using [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install) on Windows or Docker for cross-platform compatibility.
+> **Platform Support**: Mini-SGLang supports generic CPU execution on **macOS** and **Linux**.
+> CUDA execution is available on supported Linux GPU hosts through the `cuda` extra.
 
 ### 1. Environment Setup
 
@@ -36,7 +37,7 @@ uv venv --python=3.12
 source .venv/bin/activate
 ```
 
-**Prerequisites**: Mini-SGLang relies on CUDA kernels that are JIT-compiled. Ensure you have the **NVIDIA CUDA Toolkit** installed and that its version matches your driver's version. You can check your driver's CUDA capability with `nvidia-smi`.
+**CUDA prerequisites**: CUDA execution relies on JIT-compiled CUDA kernels. Ensure you have the **NVIDIA CUDA Toolkit** installed and that its version matches your driver's version. You can check your driver's CUDA capability with `nvidia-smi`.
 
 ### 2. Installation
 
@@ -46,6 +47,12 @@ Install Mini-SGLang directly from the source:
 git clone https://github.com/sgl-project/mini-sglang.git
 cd mini-sglang && uv venv --python=3.12 && source .venv/bin/activate
 uv pip install -e .
+```
+
+Install CUDA-only kernel packages when running on CUDA GPUs:
+
+```bash
+uv pip install -e ".[cuda]"
 ```
 
 <details>
@@ -120,6 +127,9 @@ python -m minisgl --model "Qwen/Qwen3-0.6B"
 
 # Deploy meta-llama/Llama-3.1-70B-Instruct on 4 GPUs with Tensor Parallelism, on port 30000
 python -m minisgl --model "meta-llama/Llama-3.1-70B-Instruct" --tp 4 --port 30000
+
+# Deploy on CPU (macOS/Linux)
+python -m minisgl --model "Qwen/Qwen3-0.6B" --device cpu
 ```
 
 Once the server is running, you can send requests using standard tools like `curl` or any OpenAI-compatible client.

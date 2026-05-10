@@ -21,7 +21,7 @@ def torch_dtype(dtype: torch.dtype):
 
 
 def nvtx_annotate(name: str, layer_id_field: str | None = None):
-    import torch.cuda.nvtx as nvtx
+    from minisgl import device as device_mod
 
     def decorator(fn):
         @functools.wraps(fn)
@@ -29,9 +29,23 @@ def nvtx_annotate(name: str, layer_id_field: str | None = None):
             display_name = name
             if layer_id_field and hasattr(self, layer_id_field):
                 display_name = name.format(getattr(self, layer_id_field))
-            with nvtx.range(display_name):
+            device = _infer_device(self, args, kwargs)
+            with device_mod.nvtx_range(device, display_name):
                 return fn(self, *args, **kwargs)
 
         return wrapper
 
     return decorator
+
+
+def _infer_device(self, args, kwargs):
+    import torch
+
+    if (device := getattr(self, "device", None)) is not None:
+        return torch.device(device)
+
+    for value in list(args) + list(kwargs.values()):
+        if isinstance(value, torch.Tensor):
+            return value.device
+
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")

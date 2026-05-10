@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from minisgl.benchmark.perf import compare_memory_kernel_perf
+import pytest
 import torch
+from minisgl.benchmark.perf import compare_memory_kernel_perf
 from minisgl.kernel import store_cache
 from minisgl.utils import call_if_main
 
 
 @call_if_main(__name__)
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA store benchmark requires CUDA")
 def test_store_cache():
     HEAD_SIZE = 128
     NUM_TOKENS = 1048576  # 1M
