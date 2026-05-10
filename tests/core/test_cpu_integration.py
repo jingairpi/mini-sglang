@@ -160,15 +160,11 @@ def test_cpu_prefix_caching(cpu_scheduler):
             )
         )
 
-        tokens_received = 0
         while True:
             if recv.socket.poll(timeout=30000) == 0:
                 pytest.fail(f"Timeout waiting for response to req {req_id}")
             msg = recv.get()
             assert isinstance(msg, DetokenizeMsg)
             assert msg.uid == req_id
-            tokens_received += 1
             if msg.finished:
                 break
-
-        assert tokens_received >= 1
