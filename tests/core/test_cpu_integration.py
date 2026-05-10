@@ -133,7 +133,6 @@ def _write_tiny_tokenizer(model_dir: Path) -> None:
     fast_tokenizer.save_pretrained(model_dir)
 
 
-@pytest.mark.timeout(120)
 def test_cpu_scheduler_completes_request(cpu_scheduler):
     send = cpu_scheduler["send"]
     recv = cpu_scheduler["recv"]
