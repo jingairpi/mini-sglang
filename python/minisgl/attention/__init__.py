@@ -15,59 +15,50 @@ logger = init_logger(__name__)
 
 
 class BackendCreator(Protocol):
-    def __call__(
-        self,
-        config: ModelConfig,
-        *,
-        kvcache: BaseKVCachePool | None = None,
-        page_table: torch.Tensor | None = None,
-        device: torch.device | None = None,
-    ) -> BaseAttnBackend: ...
+    def __call__(self, config: ModelConfig) -> BaseAttnBackend: ...
 
 
 SUPPORTED_ATTENTION_BACKENDS = Registry[BackendCreator]("Attention Backend")
 
 
 @SUPPORTED_ATTENTION_BACKENDS.register("trtllm")
-def create_trtllm_backend(config: ModelConfig, **_: object):
+def create_trtllm_backend(config: ModelConfig):
     from .trtllm import TensorRTLLMBackend
 
     return TensorRTLLMBackend(config)
 
 
 @SUPPORTED_ATTENTION_BACKENDS.register("fi")
-def create_fi_backend(config: ModelConfig, **_: object):
+def create_fi_backend(config: ModelConfig):
     from .fi import FlashInferBackend
 
     return FlashInferBackend(config)
 
 
 @SUPPORTED_ATTENTION_BACKENDS.register("fa")
-def create_fa_backend(config: ModelConfig, **_: object):
+def create_fa_backend(config: ModelConfig):
     from .fa import FlashAttentionBackend
 
     return FlashAttentionBackend(config)
 
 
-@SUPPORTED_ATTENTION_BACKENDS.register("cpu")
 def create_cpu_backend(
     config: ModelConfig,
     *,
-    kvcache: BaseKVCachePool | None = None,
-    page_table: torch.Tensor | None = None,
-    device: torch.device | None = None,
-):
+    kvcache: BaseKVCachePool,
+    page_table: torch.Tensor,
+    device: torch.device,
+) -> BaseAttnBackend:
     from .cpu import CPUAttentionBackend
 
-    if kvcache is None or page_table is None or device is None:
-        raise ValueError("CPU attention backend requires explicit kvcache, page_table, and device.")
     return CPUAttentionBackend(config, kvcache=kvcache, page_table=page_table, device=device)
 
 
 def validate_attn_backend(backend: str, allow_auto: bool = True):
     if backend != "auto":
         required_backends = backend.split(",") if "," in backend else [backend]
-        SUPPORTED_ATTENTION_BACKENDS.assert_supported(required_backends)
+        cuda_backends = [name for name in required_backends if name != "cpu"]
+        SUPPORTED_ATTENTION_BACKENDS.assert_supported(cuda_backends)
     else:
         assert allow_auto, "auto is not allowed here"
     return backend
@@ -97,9 +88,14 @@ def create_attention_backend(
         backend = p_backend  # both are the same, fall through to single backend
         logger.warning(f"P/D attention backends are the same: {backend}, using single backend.")
 
-    return SUPPORTED_ATTENTION_BACKENDS[backend](
-        config, kvcache=kvcache, page_table=page_table, device=device
-    )
+    if backend == "cpu":
+        if kvcache is None or page_table is None or device is None:
+            raise ValueError(
+                "CPU attention backend requires explicit kvcache, page_table, and device."
+            )
+        return create_cpu_backend(config, kvcache=kvcache, page_table=page_table, device=device)
+
+    return SUPPORTED_ATTENTION_BACKENDS[backend](config)
 
 
 __all__ = [
