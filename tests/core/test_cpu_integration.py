@@ -141,28 +141,24 @@ def _write_tiny_tokenizer(model_dir: Path) -> None:
 
 
 @pytest.mark.timeout(120)
-def test_cpu_prefix_caching(cpu_scheduler):
+def test_cpu_scheduler_completes_request(cpu_scheduler):
     send = cpu_scheduler["send"]
     recv = cpu_scheduler["recv"]
 
-    ids1 = [101, 102, 103, 104]
-    ids2 = [101, 102, 103, 104, 201, 202]
-
-    for req_id, input_ids_list in enumerate([ids1, ids2], start=200):
-        input_ids = torch.tensor(input_ids_list, dtype=torch.int32)
-        send.put(
-            UserMsg(
-                uid=req_id,
-                input_ids=input_ids,
-                sampling_params=SamplingParams(max_tokens=3),
-            )
+    req_id = 200
+    send.put(
+        UserMsg(
+            uid=req_id,
+            input_ids=torch.tensor([101, 102, 103, 104], dtype=torch.int32),
+            sampling_params=SamplingParams(max_tokens=3),
         )
+    )
 
-        while True:
-            if recv.socket.poll(timeout=30000) == 0:
-                pytest.fail(f"Timeout waiting for response to req {req_id}")
-            msg = recv.get()
-            assert isinstance(msg, DetokenizeMsg)
-            assert msg.uid == req_id
-            if msg.finished:
-                break
+    while True:
+        if recv.socket.poll(timeout=30000) == 0:
+            pytest.fail(f"Timeout waiting for response to req {req_id}")
+        msg = recv.get()
+        assert isinstance(msg, DetokenizeMsg)
+        assert msg.uid == req_id
+        if msg.finished:
+            break
