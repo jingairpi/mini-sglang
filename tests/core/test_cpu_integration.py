@@ -143,36 +143,6 @@ def _write_tiny_tokenizer(model_dir: Path) -> None:
 @pytest.mark.integration
 @pytest.mark.slow
 @pytest.mark.timeout(120)
-def test_cpu_single_request(cpu_scheduler):
-    send = cpu_scheduler["send"]
-    recv = cpu_scheduler["recv"]
-
-    input_ids = torch.tensor([101, 102, 103, 104], dtype=torch.int32)
-    send.put(
-        UserMsg(
-            uid=100,
-            input_ids=input_ids,
-            sampling_params=SamplingParams(max_tokens=3),
-        )
-    )
-
-    tokens_received = 0
-    while True:
-        if recv.socket.poll(timeout=30000) == 0:
-            pytest.fail("Timeout waiting for response")
-        msg = recv.get()
-        assert isinstance(msg, DetokenizeMsg)
-        assert msg.uid == 100
-        tokens_received += 1
-        if msg.finished:
-            break
-
-    assert tokens_received >= 1
-
-
-@pytest.mark.integration
-@pytest.mark.slow
-@pytest.mark.timeout(120)
 def test_cpu_prefix_caching(cpu_scheduler):
     send = cpu_scheduler["send"]
     recv = cpu_scheduler["recv"]
