@@ -16,9 +16,7 @@ def _cpu_rope_inplace(
     key: torch.Tensor,
     head_size: int,
     cos_sin_cache: torch.Tensor,
-    is_neox: bool = True,
 ) -> None:
-    _ = is_neox
     num_tokens = query.shape[0]
     num_q_heads = query.shape[1] // head_size
     num_k_heads = key.shape[1] // head_size

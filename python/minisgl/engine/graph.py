@@ -59,11 +59,11 @@ def _determine_cuda_graph_bs(
     free_memory: int,
     device: torch.device,
 ) -> List[int]:
-    if cuda_graph_bs is not None:
-        return cuda_graph_bs
-
     if device_mod.is_cpu(device):
         return []
+
+    if cuda_graph_bs is not None:
+        return cuda_graph_bs
 
     free_memory_gb = free_memory / (1 << 30)
     if cuda_graph_max_bs is None:
@@ -126,17 +126,11 @@ class GraphRunner:
 
         self.attn_backend.init_capture_graph(max_seq_len=max_seq_len, bs_list=self.graph_bs_list)
 
-        if device_mod.is_cuda(self.device):
-            torch.cuda.synchronize(self.device)
-            torch.cuda.empty_cache()
-            torch.cuda.reset_peak_memory_stats(self.device)
-            free_memory = get_free_memory(self.device)
-            logger.info_rank0(
-                f"Free GPU memory before capturing CUDA graphs: {mem_GB(free_memory)}"
-            )
-        else:
-            free_memory = device_mod.mem_get_info(self.device)[0]
-            logger.info_rank0(f"Free memory before capturing CUDA graphs: {mem_GB(free_memory)}")
+        torch.cuda.synchronize(self.device)
+        torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats(self.device)
+        free_memory = get_free_memory(self.device)
+        logger.info_rank0(f"Free GPU memory before capturing CUDA graphs: {mem_GB(free_memory)}")
 
         logger.info_rank0(f"Start capturing CUDA graphs with sizes: {self.graph_bs_list}")
 
