@@ -119,7 +119,7 @@ class Engine:
         )
 
     def _init_communication(self, config: EngineConfig) -> torch.distributed.ProcessGroup:
-        if config.tp_info.size == 1 or config.use_pynccl:
+        if config.tp_info.size == 1 or config.use_pynccl or device_mod.is_cpu(self.device):
             torch.distributed.init_process_group(
                 backend="gloo",
                 rank=config.tp_info.rank,
@@ -268,6 +268,9 @@ def _adjust_config(config: EngineConfig):
     ):
         override("page_size", 64)
         logger.warning_rank0("Page size is overridden to 64 for TRTLLM backend")
+
+    if device_mod.is_cpu(device) and config.model_config.is_moe:
+        raise ValueError("CPU execution does not support MoE models.")
 
     if config.model_config.is_moe and config.moe_backend == "auto":
         override("moe_backend", "fused")
