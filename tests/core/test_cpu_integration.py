@@ -1,5 +1,3 @@
-"""CPU scheduler integration coverage with a generated local model."""
-
 from __future__ import annotations
 
 import multiprocessing as mp
@@ -13,25 +11,20 @@ from minisgl.core import SamplingParams
 from minisgl.distributed import DistributedInfo
 from minisgl.message import BaseBackendMsg, BaseTokenizerMsg, DetokenizeMsg, ExitMsg, UserMsg
 from minisgl.scheduler import Scheduler, SchedulerConfig
-from minisgl.utils import ZmqPullQueue, ZmqPushQueue, init_logger
+from minisgl.utils import ZmqPullQueue, ZmqPushQueue
 from tokenizers import Tokenizer
 from tokenizers.models import WordLevel
 from tokenizers.pre_tokenizers import Whitespace
 from transformers import PreTrainedTokenizerFast
 
-logger = init_logger(__name__)
-
 
 def _scheduler_process(config: SchedulerConfig, queue: mp.Queue) -> None:
     try:
         signal.signal(signal.SIGINT, signal.SIG_IGN)
-        logger.info("Initializing scheduler subprocess...")
         scheduler = Scheduler(config)
-        logger.info("Scheduler subprocess ready.")
         queue.put("READY")
         scheduler.run_forever()
     except Exception as e:
-        logger.error(f"Scheduler failed: {e}")
         queue.put(e)
         raise
 

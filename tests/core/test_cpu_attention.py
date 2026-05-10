@@ -7,17 +7,6 @@ import torch.nn.functional as F
 from minisgl.attention.cpu import CPUAttentionBackend
 
 
-class _Req:
-    def __init__(self, device_len: int, extend_len: int, table_idx: int = 0) -> None:
-        self.device_len = device_len
-        self.extend_len = extend_len
-        self.table_idx = table_idx
-
-    @property
-    def cached_len(self) -> int:
-        return self.device_len - self.extend_len
-
-
 def test_cpu_attention_uses_rank_local_kv_heads_from_cache_shape() -> None:
     class KVCache:
         def __init__(self) -> None:
@@ -39,7 +28,7 @@ def test_cpu_attention_uses_rank_local_kv_heads_from_cache_shape() -> None:
             _ = layer_id
             return self.v
 
-    req = _Req(device_len=4, extend_len=4, table_idx=0)
+    req = SimpleNamespace(device_len=4, extend_len=4, cached_len=0, table_idx=0)
     batch = SimpleNamespace(
         reqs=[req],
         padded_reqs=[req],
