@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
-from typing import Any, Dict, NamedTuple, Protocol, Tuple
+from typing import Any, Dict, NamedTuple, Tuple
 
 import torch
 from minisgl import device as device_mod
@@ -24,11 +24,7 @@ logger = init_logger(__name__)
 class ForwardOutput(NamedTuple):
     next_tokens_device: torch.Tensor
     next_tokens_cpu: torch.Tensor
-    copy_done: "SynchronizationEvent | None"
-
-
-class SynchronizationEvent(Protocol):
-    def synchronize(self) -> None: ...
+    copy_done: torch.cuda.Event | None
 
 
 class Engine:

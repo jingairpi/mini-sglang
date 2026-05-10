@@ -31,4 +31,3 @@ env/
 # .vscode
 .vscode/
 .coverage
-htmlcov/
