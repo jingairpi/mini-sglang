@@ -140,8 +140,6 @@ def _write_tiny_tokenizer(model_dir: Path) -> None:
     fast_tokenizer.save_pretrained(model_dir)
 
 
-@pytest.mark.integration
-@pytest.mark.slow
 @pytest.mark.timeout(120)
 def test_cpu_prefix_caching(cpu_scheduler):
     send = cpu_scheduler["send"]
