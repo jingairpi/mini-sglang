@@ -18,8 +18,8 @@ Mini-SGLang is a compact implementation of [SGLang](https://github.com/sgl-proje
   - **Radix Cache**: Reuses KV cache for shared prefixes across requests.
   - **Chunked Prefill**: Reduces peak memory usage for long-context serving.
   - **Overlap Scheduling**: Hides CPU scheduling overhead with GPU computation.
-  - **Tensor Parallelism**: Scales inference across multiple GPUs.
-  - **Optimized Kernels**: Integrates **FlashAttention** and **FlashInfer** for maximum efficiency.
+  - **Tensor Parallelism**: Scales inference across tensor-parallel ranks.
+  - **Optimized Kernels**: Uses CPU PyTorch paths and CUDA attention kernels for the selected execution device.
   - ...
 
 ## 🚀 Quick Start
@@ -58,7 +58,7 @@ uv pip install -e ".[cuda]"
 <details>
 <summary><b>💡 Installing on Windows (WSL2)</b></summary>
 
-Since Mini-SGLang requires Linux-specific dependencies, Windows users should use WSL2:
+Windows is not a native supported target. Windows users should use WSL2:
 
 1. **Install WSL2** (if not already installed):
    ```powershell
@@ -76,6 +76,11 @@ Since Mini-SGLang requires Linux-specific dependencies, Windows users should use
    git clone https://github.com/sgl-project/mini-sglang.git
    cd mini-sglang && uv venv --python=3.12 && source .venv/bin/activate
    uv pip install -e .
+   ```
+
+   Install CUDA packages in WSL2 when running on NVIDIA GPUs:
+   ```bash
+   uv pip install -e ".[cuda]"
    ```
 
 4. **Access from Windows**: The server will be accessible at `http://localhost:8000` from Windows browsers and applications.

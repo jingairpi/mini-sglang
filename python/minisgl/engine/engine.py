@@ -238,13 +238,17 @@ def _adjust_config(config: EngineConfig):
 
     device = device_mod.resolve_device(config.device, rank=config.tp_info.rank)
 
-    if config.attention_backend == "auto":
-        if device_mod.is_cpu(device):
+    if device_mod.is_cpu(device):
+        if config.attention_backend == "auto":
             backend = "cpu"
-        else:
-            backend = (
-                "trtllm" if is_sm100_supported() else ("fa,fi" if is_sm90_supported() else "fi")
+            override("attention_backend", backend)
+            logger.info_rank0(f"Auto-selected attention backend: {config.attention_backend}")
+        elif config.attention_backend != "cpu":
+            raise ValueError(
+                f"CPU execution requires attention backend 'cpu', got {config.attention_backend!r}."
             )
+    elif config.attention_backend == "auto":
+        backend = "trtllm" if is_sm100_supported() else ("fa,fi" if is_sm90_supported() else "fi")
         override("attention_backend", backend)
         logger.info_rank0(f"Auto-selected attention backend: {config.attention_backend}")
 
