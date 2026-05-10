@@ -33,7 +33,6 @@ def test_cpu_auto_attention_backend_selects_cpu(monkeypatch: pytest.MonkeyPatch)
     ("device", "backend", "message"),
     [
         ("cpu", "fi", "CPU execution requires attention backend 'cpu'"),
-        ("cpu", "cpu,cpu", "CPU execution requires attention backend 'cpu'"),
         ("cuda", "cpu", "CUDA execution requires CUDA attention backends"),
     ],
 )

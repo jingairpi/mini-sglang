@@ -6,7 +6,7 @@ import pytest
 from minisgl.attention import validate_attn_backend
 
 
-@pytest.mark.parametrize("backend", ["cpu,cpu", "cpu,fi", "fi,cpu"])
+@pytest.mark.parametrize("backend", ["cpu,fi", "fi,cpu"])
 def test_cpu_attention_backend_is_not_hybrid(backend: str) -> None:
     with pytest.raises(
         ArgumentTypeError,

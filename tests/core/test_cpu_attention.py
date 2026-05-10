@@ -120,10 +120,37 @@ def test_cpu_attention_uses_rank_local_kv_heads_from_cache_shape() -> None:
     )
     backend.prepare_metadata(batch)
 
-    q = torch.randn(4, 4, 2)
-    k = torch.randn(4, 2, 2)
-    v = torch.randn(4, 2, 2)
+    q = torch.tensor(
+        [
+            [[1.0, 0.0], [0.0, 1.0], [1.0, 1.0], [0.5, 0.5]],
+            [[0.5, 1.0], [1.0, 0.5], [0.0, 1.0], [1.0, 0.0]],
+            [[1.0, -0.5], [-0.5, 1.0], [0.25, 0.75], [0.75, 0.25]],
+            [[0.0, 0.5], [0.5, 0.0], [1.0, 0.25], [0.25, 1.0]],
+        ]
+    )
+    k = torch.tensor(
+        [
+            [[1.0, 0.0], [0.0, 1.0]],
+            [[0.5, 0.5], [1.0, 0.0]],
+            [[0.0, 1.0], [0.5, 0.5]],
+            [[1.0, 1.0], [0.25, 0.75]],
+        ]
+    )
+    v = torch.tensor(
+        [
+            [[1.0, 10.0], [2.0, 20.0]],
+            [[3.0, 30.0], [4.0, 40.0]],
+            [[5.0, 50.0], [6.0, 60.0]],
+            [[7.0, 70.0], [8.0, 80.0]],
+        ]
+    )
 
     out = backend.forward(q, k, v, layer_id=0, batch=batch)
 
-    assert out.shape == (4, 8)
+    expected = F.scaled_dot_product_attention(
+        q.transpose(0, 1),
+        k.repeat_interleave(2, dim=1).transpose(0, 1),
+        v.repeat_interleave(2, dim=1).transpose(0, 1),
+        attn_mask=torch.tril(torch.ones((4, 4), dtype=torch.bool)),
+    )
+    assert torch.allclose(out, expected.transpose(0, 1).flatten(1))
