@@ -34,3 +34,17 @@ def test_cpu_rejects_cuda_attention_backend() -> None:
 
     with pytest.raises(ValueError, match="CPU execution requires attention backend 'cpu'"):
         _adjust_config(config)
+
+
+def test_cpu_rejects_hybrid_attention_backend() -> None:
+    config = _config(device="cpu", attention_backend="cpu,cpu")
+
+    with pytest.raises(ValueError, match="CPU execution requires attention backend 'cpu'"):
+        _adjust_config(config)
+
+
+def test_cuda_rejects_cpu_attention_backend() -> None:
+    config = _config(device="cuda", attention_backend="cpu")
+
+    with pytest.raises(ValueError, match="CUDA execution requires CUDA attention backends"):
+        _adjust_config(config)
