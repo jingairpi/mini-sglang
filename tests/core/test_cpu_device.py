@@ -12,7 +12,6 @@ from minisgl.layers.rotary import RotaryEmbedding
 
 @pytest.mark.skipif(torch.cuda.is_available(), reason="Running on CUDA device")
 def test_auto_device_on_cpu_only():
-    """Test device abstraction layer reports correctly on CPU only env."""
     device = device_mod.resolve_device("auto")
     assert device_mod.is_cpu(device)
     assert not device_mod.is_cuda(device)
@@ -20,7 +19,6 @@ def test_auto_device_on_cpu_only():
 
 
 def test_cpu_rope_via_embedding():
-    """Test CPU RoPE via RotaryEmbedding class."""
     head_size = 64
     rotary_dim = 64
     max_pos = 100
@@ -42,7 +40,6 @@ def test_cpu_rope_via_embedding():
 
 
 def test_cpu_rmsnorm_class():
-    """Test CPU RMSNorm class."""
     size = 128
     eps = 1e-5
     norm = RMSNorm(size, eps)
@@ -57,7 +54,6 @@ def test_cpu_rmsnorm_class():
 
 
 def test_cpu_rmsnorm_fused_class():
-    """Test CPU RMSNormFused class."""
     size = 128
     eps = 1e-5
     norm = RMSNormFused(size, eps)
@@ -76,7 +72,6 @@ def test_cpu_rmsnorm_fused_class():
 
 
 def test_cpu_silu_and_mul():
-    """Test CPU SiLU and mul activation function."""
     import torch.nn.functional as F
 
     hidden_dim = 64
@@ -84,7 +79,6 @@ def test_cpu_silu_and_mul():
 
     out = silu_and_mul(x)
 
-    # Manual verification
     gate, up = x.chunk(2, dim=-1)
     expected = F.silu(gate) * up
 
@@ -93,7 +87,6 @@ def test_cpu_silu_and_mul():
 
 
 def test_cpu_indexing():
-    """Test CPU indexing."""
     vocab_size = 100
     embedding_dim = 64
 
@@ -109,30 +102,25 @@ def test_cpu_indexing():
 
 
 def test_cpu_indexing_with_vocab_range():
-    """Test CPU indexing with vocab-parallel mode."""
     vocab_size = 100
     embedding_dim = 64
     shard_start = 25
     shard_length = 50
 
-    weights = torch.randn(shard_length, embedding_dim)  # Only local shard
+    weights = torch.randn(shard_length, embedding_dim)
     indices = torch.randint(0, vocab_size, (20,))
 
     out = indexing(weights, indices, vocab_range=(shard_start, shard_length))
 
-    # Manual verification: only indices in [25, 75) should be filled
     mask = (indices >= shard_start) & (indices < shard_start + shard_length)
     local_indices = indices[mask] - shard_start
 
-    # Check that masked positions have correct values
     assert torch.allclose(out[mask], weights[local_indices])
-    # Check that non-masked positions are zero
     if (~mask).any():
         assert torch.allclose(out[~mask], torch.zeros_like(out[~mask]))
 
 
 def test_cpu_store_cache():
-    """Test CPU store_cache operation."""
     num_pages = 100
     num_kv_heads = 4
     head_dim = 64
@@ -141,21 +129,18 @@ def test_cpu_store_cache():
     k_cache = torch.zeros(num_pages, num_kv_heads * head_dim)
     v_cache = torch.zeros(num_pages, num_kv_heads * head_dim)
 
-    # Use unique indices to avoid overwrites making verification fail
     indices = torch.arange(0, num_tokens, dtype=torch.int32)
     k = torch.randn(num_tokens, num_kv_heads * head_dim)
     v = torch.randn(num_tokens, num_kv_heads * head_dim)
 
     store_cache(k_cache, v_cache, indices, k, v)
 
-    # Verify that the values were stored correctly
     for i, idx in enumerate(indices):
         assert torch.allclose(k_cache[idx], k[i])
         assert torch.allclose(v_cache[idx], v[i])
 
 
 def test_cpu_mem_get_info():
-    """Test CPU memory info retrieval."""
     available, total = device_mod.mem_get_info(torch.device("cpu"))
 
     assert isinstance(available, int)

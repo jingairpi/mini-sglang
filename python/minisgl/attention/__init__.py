@@ -42,18 +42,6 @@ def create_fa_backend(config: ModelConfig):
     return FlashAttentionBackend(config)
 
 
-def create_cpu_backend(
-    config: ModelConfig,
-    *,
-    kvcache: BaseKVCachePool,
-    page_table: torch.Tensor,
-    device: torch.device,
-) -> BaseAttnBackend:
-    from .cpu import CPUAttentionBackend
-
-    return CPUAttentionBackend(config, kvcache=kvcache, page_table=page_table, device=device)
-
-
 def validate_attn_backend(backend: str, allow_auto: bool = True):
     if backend != "auto":
         required_backends = backend.split(",") if "," in backend else [backend]
@@ -93,7 +81,9 @@ def create_attention_backend(
             raise ValueError(
                 "CPU attention backend requires explicit kvcache, page_table, and device."
             )
-        return create_cpu_backend(config, kvcache=kvcache, page_table=page_table, device=device)
+        from .cpu import CPUAttentionBackend
+
+        return CPUAttentionBackend(config, kvcache=kvcache, page_table=page_table, device=device)
 
     return SUPPORTED_ATTENTION_BACKENDS[backend](config)
 
