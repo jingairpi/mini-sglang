@@ -29,22 +29,18 @@ def test_cpu_auto_attention_backend_selects_cpu(monkeypatch: pytest.MonkeyPatch)
     assert config.attention_backend == "cpu"
 
 
-def test_cpu_rejects_cuda_attention_backend() -> None:
-    config = _config(device="cpu", attention_backend="fi")
+@pytest.mark.parametrize(
+    ("device", "backend", "message"),
+    [
+        ("cpu", "fi", "CPU execution requires attention backend 'cpu'"),
+        ("cpu", "cpu,cpu", "CPU execution requires attention backend 'cpu'"),
+        ("cuda", "cpu", "CUDA execution requires CUDA attention backends"),
+    ],
+)
+def test_rejects_mixed_attention_device_modes(
+    device: str, backend: str, message: str
+) -> None:
+    config = _config(device=device, attention_backend=backend)
 
-    with pytest.raises(ValueError, match="CPU execution requires attention backend 'cpu'"):
-        _adjust_config(config)
-
-
-def test_cpu_rejects_hybrid_attention_backend() -> None:
-    config = _config(device="cpu", attention_backend="cpu,cpu")
-
-    with pytest.raises(ValueError, match="CPU execution requires attention backend 'cpu'"):
-        _adjust_config(config)
-
-
-def test_cuda_rejects_cpu_attention_backend() -> None:
-    config = _config(device="cuda", attention_backend="cpu")
-
-    with pytest.raises(ValueError, match="CUDA execution requires CUDA attention backends"):
+    with pytest.raises(ValueError, match=message):
         _adjust_config(config)

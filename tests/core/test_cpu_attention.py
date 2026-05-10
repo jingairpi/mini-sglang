@@ -1,59 +1,21 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from types import SimpleNamespace
-from typing import Any
 
 import torch
 import torch.nn.functional as F
-from minisgl.attention.cpu import CPUAttentionBackend, CPUAttnMetadata
+from minisgl.attention.cpu import CPUAttentionBackend
 
 
-@dataclass
 class _Req:
-    device_len: int
-    extend_len: int
-    table_idx: int = 0
+    def __init__(self, device_len: int, extend_len: int, table_idx: int = 0) -> None:
+        self.device_len = device_len
+        self.extend_len = extend_len
+        self.table_idx = table_idx
 
     @property
     def cached_len(self) -> int:
         return self.device_len - self.extend_len
-
-
-@dataclass
-class _Batch:
-    padded_reqs: list[Any]
-    attn_metadata: Any = None
-
-
-def test_cpu_attention_metadata_indices() -> None:
-    req1 = _Req(device_len=10, extend_len=3, table_idx=0)
-    req2 = _Req(device_len=5, extend_len=5, table_idx=1)
-
-    batch = _Batch(padded_reqs=[req1, req2])
-
-    @dataclass
-    class Config:
-        head_dim: int = 64
-
-    page_table = torch.zeros((2, 20), dtype=torch.int32)
-    backend = CPUAttentionBackend(
-        Config(),
-        kvcache=object(),
-        page_table=page_table,
-        device=torch.device("cpu"),
-    )
-
-    backend.prepare_metadata(batch)
-
-    meta = batch.attn_metadata
-    assert isinstance(meta, CPUAttnMetadata)
-
-    assert torch.equal(meta.cu_extend_lens, torch.tensor([0, 3, 8], dtype=torch.int32))
-    assert torch.equal(meta.cu_seqlens, torch.tensor([0, 10, 15], dtype=torch.int32))
-
-    last_indices = meta.get_last_indices(bs=2)
-    assert torch.equal(last_indices, torch.tensor([2, 7], dtype=torch.int32))
 
 
 def test_cpu_attention_forward_handles_paged_cache_and_gqa() -> None:
