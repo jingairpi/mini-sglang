@@ -133,3 +133,50 @@ def test_cpu_attention_forward_handles_paged_cache_and_gqa() -> None:
         attn_mask=torch.tril(torch.ones((3, 3), dtype=torch.bool)),
     )
     assert torch.allclose(out, expected.transpose(0, 1).flatten(1))
+
+
+def test_cpu_attention_uses_rank_local_kv_heads_from_cache_shape() -> None:
+    """CPU attention must read TP-sharded KV cache with the local KV head count."""
+
+    class MockKVCache:
+        def __init__(self) -> None:
+            self.k = torch.zeros((2, 2, 2, 2))
+            self.v = torch.zeros((2, 2, 2, 2))
+
+        def store_kv(
+            self, k: torch.Tensor, v: torch.Tensor, out_loc: torch.Tensor, layer_id: int
+        ) -> None:
+            _ = layer_id
+            self.k.view(-1, 2, 2)[out_loc] = k
+            self.v.view(-1, 2, 2)[out_loc] = v
+
+        def k_cache(self, layer_id: int) -> torch.Tensor:
+            _ = layer_id
+            return self.k
+
+        def v_cache(self, layer_id: int) -> torch.Tensor:
+            _ = layer_id
+            return self.v
+
+    req = MockReq(device_len=4, extend_len=4, table_idx=0)
+    batch = SimpleNamespace(
+        reqs=[req],
+        padded_reqs=[req],
+        out_loc=torch.tensor([0, 1, 2, 3], dtype=torch.int32),
+        is_decode=False,
+    )
+    backend = CPUAttentionBackend(
+        SimpleNamespace(head_dim=2, num_kv_heads=4),
+        kvcache=MockKVCache(),
+        page_table=torch.tensor([[0, 1, 2, 3]], dtype=torch.int32),
+        device=torch.device("cpu"),
+    )
+    backend.prepare_metadata(batch)
+
+    q = torch.randn(4, 4, 2)
+    k = torch.randn(4, 2, 2)
+    v = torch.randn(4, 2, 2)
+
+    out = backend.forward(q, k, v, layer_id=0, batch=batch)
+
+    assert out.shape == (4, 8)

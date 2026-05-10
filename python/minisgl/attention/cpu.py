@@ -69,8 +69,11 @@ class CPUAttentionBackend(BaseAttnBackend):
         if not isinstance(meta, CPUAttnMetadata):
             raise TypeError(f"Expected CPUAttnMetadata, got {type(meta).__name__}")
 
-        k_cache = self.kvcache.k_cache(layer_id).view(-1, self.config.num_kv_heads, self.dim)
-        v_cache = self.kvcache.v_cache(layer_id).view(-1, self.config.num_kv_heads, self.dim)
+        k_cache = self.kvcache.k_cache(layer_id)
+        v_cache = self.kvcache.v_cache(layer_id)
+        local_kv_heads = k_cache.shape[-2]
+        k_cache = k_cache.view(-1, local_kv_heads, self.dim)
+        v_cache = v_cache.view(-1, local_kv_heads, self.dim)
         all_k = k_cache[meta.indices]
         all_v = v_cache[meta.indices]
 
