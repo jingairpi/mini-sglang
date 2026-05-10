@@ -112,7 +112,7 @@ def parse_args(args: List[str], run_shell: bool = False) -> Tuple[ServerArgs, bo
         "--memory-ratio",
         type=float,
         default=ServerArgs.memory_ratio,
-        help="The fraction of GPU memory to use for KV cache.",
+        help="The fraction of available device memory to use for KV cache.",
     )
 
     assert ServerArgs.use_dummy_weight == False

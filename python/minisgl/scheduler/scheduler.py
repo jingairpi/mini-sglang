@@ -91,7 +91,7 @@ class Scheduler(SchedulerIOMixin):
         The main loop of overlapping scheduling and execution.
 
         It will overlap the execution of current batch and processing of last batch's results,
-        which can effectively hide CPU latency and improve GPU utilization.
+        which can effectively hide scheduler latency and improve device utilization.
         """
         blocking = not (
             last_data is not None  # don't block if we have a batch to be processed

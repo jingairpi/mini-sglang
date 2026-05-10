@@ -17,7 +17,7 @@ Mini-SGLang is a compact implementation of [SGLang](https://github.com/sgl-proje
 - **Advanced Optimizations**:
   - **Radix Cache**: Reuses KV cache for shared prefixes across requests.
   - **Chunked Prefill**: Reduces peak memory usage for long-context serving.
-  - **Overlap Scheduling**: Hides CPU scheduling overhead with GPU computation.
+  - **Overlap Scheduling**: Hides scheduling overhead behind model execution.
   - **Tensor Parallelism**: Scales inference across tensor-parallel ranks.
   - **Optimized Kernels**: Uses CPU PyTorch paths and CUDA attention kernels for the selected execution device.
   - ...
@@ -127,7 +127,7 @@ Windows is not a native supported target. Windows users should use WSL2:
 Launch an OpenAI-compatible API server with a single command.
 
 ```bash
-# Deploy Qwen/Qwen3-0.6B on a single GPU
+# Deploy Qwen/Qwen3-0.6B on the default device
 python -m minisgl --model "Qwen/Qwen3-0.6B"
 
 # Deploy meta-llama/Llama-3.1-70B-Instruct on 4 GPUs with Tensor Parallelism, on port 30000

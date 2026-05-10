@@ -58,7 +58,7 @@ Adopting the original design from [SGLang](https://github.com/sgl-project/sglang
 
 ## Overlap Scheduling
 
-To further reduce CPU overhead, Mini-SGLang employs overlap scheduling, a technique proposed in [NanoFlow](https://arxiv.org/abs/2408.12757). This approach overlaps the CPU scheduling overhead with GPU computation, improving overall system throughput.
+To further reduce scheduling overhead, Mini-SGLang employs overlap scheduling, a technique proposed in [NanoFlow](https://arxiv.org/abs/2408.12757). This approach overlaps scheduler work with model execution, improving overall system throughput.
 
 ![overlap](https://lmsys.org/images/blog/sglang_v0_4/scheduler.jpg)
 *Illustration of Overlap Scheduling from [LMSYS Blog](https://lmsys.org/blog/2024-12-04-sglang-v0-4/).*
