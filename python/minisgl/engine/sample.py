@@ -81,6 +81,7 @@ def _apply_top_p(probs: torch.Tensor, top_p: torch.Tensor | float) -> torch.Tens
     top_p = top_p.clamp(min=0.0, max=1.0)
     sorted_probs, sorted_indices = torch.sort(probs, descending=True, dim=-1)
     remove = sorted_probs.cumsum(dim=-1) > top_p.unsqueeze(1)
+    remove[:, 1:] = remove[:, :-1].clone()
     remove[:, 0] = False
     sorted_probs = sorted_probs.masked_fill(remove, 0.0)
     filtered = torch.zeros_like(probs).scatter(1, sorted_indices, sorted_probs)
