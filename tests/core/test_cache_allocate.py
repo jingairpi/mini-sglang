@@ -196,7 +196,3 @@ class TestAllocateEvictPageAlignment:
         allocated = cm._allocate(1)
         _assert_all_page_aligned(allocated, page_size, "allocated after evict")
         _assert_all_page_aligned(cm.free_slots, page_size, "_free_slots after evict")
-
-
-if __name__ == "__main__":
-    pytest.main([__file__])
