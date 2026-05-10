@@ -45,6 +45,10 @@ def create_fa_backend(config: ModelConfig):
 def validate_attn_backend(backend: str, allow_auto: bool = True):
     if backend != "auto":
         required_backends = backend.split(",") if "," in backend else [backend]
+        if "cpu" in required_backends and required_backends != ["cpu"]:
+            from argparse import ArgumentTypeError
+
+            raise ArgumentTypeError("CPU attention backend must be specified as 'cpu'.")
         cuda_backends = [name for name in required_backends if name != "cpu"]
         SUPPORTED_ATTENTION_BACKENDS.assert_supported(cuda_backends)
     else:
