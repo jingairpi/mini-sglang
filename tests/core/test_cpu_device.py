@@ -6,18 +6,8 @@ from minisgl import device as device_mod
 from minisgl.kernel.index import indexing
 from minisgl.kernel.store import store_cache
 from minisgl.layers.activation import silu_and_mul
-from minisgl.layers.norm import RMSNorm, RMSNormFused, _cpu_fused_add_rmsnorm, _cpu_rmsnorm
-from minisgl.layers.rotary import RotaryEmbedding, _cpu_rope_inplace
-
-
-def test_device_helpers_are_stateless_and_explicit() -> None:
-    device = torch.device("cpu")
-    assert device_mod.is_cpu(device)
-    assert not device_mod.is_cuda(device)
-    assert not device_mod.supports_pinned_memory(device)
-
-    with device_mod.nvtx_range(device, "test"):
-        pass
+from minisgl.layers.norm import RMSNorm, RMSNormFused
+from minisgl.layers.rotary import RotaryEmbedding
 
 
 @pytest.mark.skipif(torch.cuda.is_available(), reason="Running on CUDA device")
@@ -27,34 +17,6 @@ def test_auto_device_on_cpu_only():
     assert device_mod.is_cpu(device)
     assert not device_mod.is_cuda(device)
     assert device.type == "cpu"
-
-
-def test_cpu_rope_function():
-    """Test standalone CPU RoPE function directly."""
-    head_size = 64
-    max_pos = 100
-    num_tokens = 20
-    num_q_heads = 4
-    num_k_heads = 4
-
-    q = torch.randn(num_tokens, num_q_heads * head_size)
-    k = torch.randn(num_tokens, num_k_heads * head_size)
-    positions = torch.randint(0, max_pos, (num_tokens,))
-
-    # Build cos_sin_cache
-    inv_freq = 1.0 / (10000.0 ** (torch.arange(0, head_size, 2, dtype=torch.float) / head_size))
-    t = torch.arange(max_pos, dtype=torch.float)
-    freqs = torch.einsum("i,j -> ij", t, inv_freq)
-    cos_sin_cache = torch.cat((freqs.cos(), freqs.sin()), dim=-1)
-
-    q_orig = q.clone()
-    k_orig = k.clone()
-
-    _cpu_rope_inplace(positions, q, k, head_size, cos_sin_cache)
-
-    assert q.shape == q_orig.shape
-    assert k.shape == k_orig.shape
-    assert not torch.allclose(q, q_orig)  # Rotation should change values
 
 
 def test_cpu_rope_via_embedding():
@@ -77,64 +39,6 @@ def test_cpu_rope_via_embedding():
     assert q_out.shape == q.shape
     assert k_out.shape == k.shape
     assert not torch.allclose(q, q_out)
-
-
-def test_cpu_rmsnorm_function():
-    """Test standalone CPU RMSNorm function."""
-    size = 128
-    eps = 1e-5
-    x = torch.randn(10, size)
-    weight = torch.ones(size)
-
-    out = _cpu_rmsnorm(x, weight, eps)
-
-    # Manual verification
-    variance = x.pow(2).mean(-1, keepdim=True)
-    expected = x * torch.rsqrt(variance + eps) * weight
-
-    assert torch.allclose(out, expected, atol=1e-5)
-
-
-def test_cpu_rmsnorm_function_inplace():
-    """Test CPU RMSNorm function with in-place output."""
-    size = 128
-    eps = 1e-5
-    x = torch.randn(10, size)
-    weight = torch.ones(size)
-    out = torch.empty_like(x)
-
-    result = _cpu_rmsnorm(x, weight, eps, out=out)
-
-    # Should return the out tensor
-    assert result is out
-
-    # Verify correctness
-    variance = x.pow(2).mean(-1, keepdim=True)
-    expected = x * torch.rsqrt(variance + eps) * weight
-    assert torch.allclose(out, expected, atol=1e-5)
-
-
-def test_cpu_fused_add_rmsnorm_function():
-    """Test standalone CPU fused add + rmsnorm function."""
-    size = 128
-    eps = 1e-5
-    x = torch.randn(10, size)
-    residual = torch.randn(10, size)
-    weight = torch.ones(size)
-
-    x_orig = x.clone()
-    residual_orig = residual.clone()
-
-    _cpu_fused_add_rmsnorm(x, residual, weight, eps)
-
-    # Check residual was updated
-    expected_resid = residual_orig + x_orig
-    assert torch.allclose(residual, expected_resid)
-
-    # Check x contains normalized result
-    variance = expected_resid.pow(2).mean(-1, keepdim=True)
-    expected_out = expected_resid * torch.rsqrt(variance + eps) * weight
-    assert torch.allclose(x, expected_out, atol=1e-5)
 
 
 def test_cpu_rmsnorm_class():

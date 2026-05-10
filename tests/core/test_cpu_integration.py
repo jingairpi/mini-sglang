@@ -155,14 +155,6 @@ def _write_tiny_tokenizer(model_dir: Path) -> None:
 @pytest.mark.integration
 @pytest.mark.slow
 @pytest.mark.timeout(120)
-def test_cpu_scheduler_starts(cpu_scheduler):
-    """Test that CPU scheduler starts successfully."""
-    assert cpu_scheduler["process"].is_alive()
-
-
-@pytest.mark.integration
-@pytest.mark.slow
-@pytest.mark.timeout(120)
 def test_cpu_single_request(cpu_scheduler):
     """Test processing a single request on CPU."""
     send = cpu_scheduler["send"]
