@@ -54,30 +54,9 @@ def test_cpu_attention_uses_rank_local_kv_heads_from_cache_shape() -> None:
     )
     backend.prepare_metadata(batch)
 
-    q = torch.tensor(
-        [
-            [[1.0, 0.0], [0.0, 1.0], [1.0, 1.0], [0.5, 0.5]],
-            [[0.5, 1.0], [1.0, 0.5], [0.0, 1.0], [1.0, 0.0]],
-            [[1.0, -0.5], [-0.5, 1.0], [0.25, 0.75], [0.75, 0.25]],
-            [[0.0, 0.5], [0.5, 0.0], [1.0, 0.25], [0.25, 1.0]],
-        ]
-    )
-    k = torch.tensor(
-        [
-            [[1.0, 0.0], [0.0, 1.0]],
-            [[0.5, 0.5], [1.0, 0.0]],
-            [[0.0, 1.0], [0.5, 0.5]],
-            [[1.0, 1.0], [0.25, 0.75]],
-        ]
-    )
-    v = torch.tensor(
-        [
-            [[1.0, 10.0], [2.0, 20.0]],
-            [[3.0, 30.0], [4.0, 40.0]],
-            [[5.0, 50.0], [6.0, 60.0]],
-            [[7.0, 70.0], [8.0, 80.0]],
-        ]
-    )
+    q = torch.arange(32, dtype=torch.float32).reshape(4, 4, 2) / 10
+    k = torch.arange(16, dtype=torch.float32).reshape(4, 2, 2) / 10
+    v = torch.arange(16, dtype=torch.float32).reshape(4, 2, 2)
 
     out = backend.forward(q, k, v, layer_id=0, batch=batch)
 
