@@ -15,7 +15,7 @@ python -m minisgl --model "Qwen/Qwen3-0.6B" --shell
 ```
 
 ## CPU Execution
-Mini-SGLang supports CPU execution for development and testing on macOS and Linux. This mode uses PyTorch fallbacks for CUDA-specific attention, sampling, kernel, and layer operations.
+Mini-SGLang supports CPU execution on macOS and Linux. CPU mode uses PyTorch implementations for attention, sampling, kernel, and layer operations.
 
 To enable CPU mode, use `--device cpu`.
 

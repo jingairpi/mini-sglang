@@ -12,7 +12,6 @@ def silu_and_mul(x: torch.Tensor, out: torch.Tensor | None = None) -> torch.Tens
     is the gate and the second half is the value.
     """
     if device_mod.is_cpu(x.device):
-        # CPU fallback using PyTorch
         gate, up = x.chunk(2, dim=-1)
         if out is not None:
             torch.mul(F.silu(gate), up, out=out)
@@ -26,7 +25,6 @@ def silu_and_mul(x: torch.Tensor, out: torch.Tensor | None = None) -> torch.Tens
 
 def gelu_and_mul(x: torch.Tensor, out: torch.Tensor | None = None):
     if device_mod.is_cpu(x.device):
-        # CPU fallback using PyTorch
         gate, up = x.chunk(2, dim=-1)
         if out is not None:
             torch.mul(F.gelu(gate), up, out=out)

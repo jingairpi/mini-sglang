@@ -2,13 +2,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
-import torch
-from minisgl import device as device_mod
-from minisgl.utils import Registry, init_logger, is_sm90_supported, is_sm100_supported
+from minisgl.utils import Registry, init_logger
 
 from .base import BaseAttnBackend, BaseAttnMetadata, HybridBackend
 
 if TYPE_CHECKING:
+    import torch
     from minisgl.kvcache import BaseKVCachePool
     from minisgl.models import ModelConfig
 
@@ -34,18 +33,6 @@ def create_trtllm_backend(config: ModelConfig, **_: object):
     from .trtllm import TensorRTLLMBackend
 
     return TensorRTLLMBackend(config)
-
-
-def resolve_auto_backend(device: torch.device) -> str:
-    """Determine the best attention backend based on the GPU architecture and model."""
-    if device_mod.is_cpu(device):
-        return "cpu"
-    if is_sm100_supported():  # blackwell
-        return "fi"
-    elif is_sm90_supported():  # hopper
-        return "fa,fi"
-    else:  # pre-hopper
-        return "fi"
 
 
 @SUPPORTED_ATTENTION_BACKENDS.register("fi")

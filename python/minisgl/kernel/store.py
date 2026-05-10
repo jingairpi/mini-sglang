@@ -35,10 +35,6 @@ def store_cache(
     k: torch.Tensor,
     v: torch.Tensor,
 ) -> None:
-    """Store key-value pairs into the cache at specified indices.
-
-    On CPU, uses direct tensor indexing. On CUDA, uses JIT-compiled kernel.
-    """
     num_tokens = k_cache.shape[0]
     k_cache = k_cache.view(num_tokens, -1)
     v_cache = v_cache.view(num_tokens, -1)
@@ -46,7 +42,6 @@ def store_cache(
     if is_cpu(k_cache.device):
         k_flat = k.contiguous().view(indices.shape[0], -1)
         v_flat = v.contiguous().view(indices.shape[0], -1)
-        # Note: Caller must ensure indices are within k_cache/v_cache bounds
         k_cache[indices] = k_flat
         v_cache[indices] = v_flat
         return

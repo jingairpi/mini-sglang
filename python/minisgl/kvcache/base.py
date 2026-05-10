@@ -60,8 +60,7 @@ class InsertResult(NamedTuple):
 
 
 class MatchResult(NamedTuple):
-    cuda_handle: BaseCacheHandle
-    # TODO: support HiCache
+    device_handle: BaseCacheHandle
 
 
 class BasePrefixCache(ABC):

@@ -18,8 +18,7 @@ class SchedulerConfig(EngineConfig):
     cache_type: str = "radix"
     offline_mode: bool = False
 
-    # Networking config: IPC addresses use tempfile.gettempdir() for cross-platform
-    # compatibility (e.g., macOS uses /var/folders/... instead of /tmp)
+    # IPC addresses use the platform temp directory.
     _unique_suffix: str = field(default_factory=_get_pid_suffix)
 
     @property

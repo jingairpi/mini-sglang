@@ -123,7 +123,7 @@ addopts = [
 ]
 markers = [
     "integration: marks tests as integration tests (require full scheduler startup)",
-    "slow: marks tests as slow (may require network/model downloads)",
+    "slow: marks tests as slow",
 ]
 
 [tool.mypy]

@@ -70,7 +70,7 @@ class Scheduler(SchedulerIOMixin):
             self.cache_manager, self.table_manager, self.decode_manager
         )
 
-        # some alias for easy access
+        # Commonly accessed scheduler state.
         self.finished_reqs: Set[Req] = set()
         self.tokenizer = load_tokenizer(config.model_path)
         self.eos_token_id = self.tokenizer.eos_token_id

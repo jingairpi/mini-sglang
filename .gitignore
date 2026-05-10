@@ -32,4 +32,3 @@ env/
 .vscode/
 .coverage
 htmlcov/
-uv.lock

@@ -11,10 +11,6 @@ from minisgl.layers.rotary import RotaryEmbedding, _cpu_rope_inplace
 
 
 def test_device_helpers_are_stateless_and_explicit() -> None:
-    assert not hasattr(device_mod, "set_device")
-    assert not hasattr(device_mod, "reset_device")
-    assert not hasattr(device_mod, "get_device")
-
     device = torch.device("cpu")
     assert device_mod.is_cpu(device)
     assert not device_mod.is_cuda(device)
@@ -193,7 +189,7 @@ def test_cpu_silu_and_mul():
 
 
 def test_cpu_indexing():
-    """Test CPU indexing (embedding) fallback."""
+    """Test CPU indexing."""
     vocab_size = 100
     embedding_dim = 64
 

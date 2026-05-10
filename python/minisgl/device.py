@@ -32,17 +32,6 @@ def supports_pinned_memory(device: str | torch.device) -> bool:
     return is_cuda(device)
 
 
-def synchronize(device: str | torch.device) -> None:
-    resolved = torch.device(device)
-    if is_cuda(resolved):
-        torch.cuda.synchronize(resolved)
-
-
-def empty_cache(device: str | torch.device) -> None:
-    if is_cuda(device):
-        torch.cuda.empty_cache()
-
-
 def mem_get_info(device: str | torch.device) -> tuple[int, int]:
     resolved = torch.device(device)
     if is_cuda(resolved):
@@ -71,8 +60,6 @@ __all__ = [
     "is_cuda",
     "is_cpu",
     "supports_pinned_memory",
-    "synchronize",
-    "empty_cache",
     "mem_get_info",
     "nvtx_range",
 ]
