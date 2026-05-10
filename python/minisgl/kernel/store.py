@@ -6,11 +6,12 @@ from typing import TYPE_CHECKING
 import torch
 from minisgl.device import is_cpu
 
-from .constants import DEFAULT_KERNEL_CONFIG
 from .utils import KernelConfig, load_jit, make_cpp_args
 
 if TYPE_CHECKING:
     from tvm_ffi import Module
+
+DEFAULT_KERNEL_CONFIG = KernelConfig(num_threads=128, max_occupancy=1, use_pdl=False)
 
 
 @functools.cache
