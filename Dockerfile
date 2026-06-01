@@ -28,7 +28,7 @@ COPY python/ ./python/
 # Create venv and install dependencies
 RUN uv venv --python=python${PYTHON_VERSION} /app/.venv \
     && . /app/.venv/bin/activate \
-    && uv pip install -e . \
+    && uv pip install -e ".[cuda]" \
     && uv pip install torch-c-dlpack-ext
 
 # Runtime stage

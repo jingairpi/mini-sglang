@@ -4,6 +4,7 @@ from datetime import timedelta
 from typing import Any, Dict, NamedTuple, Tuple
 
 import torch
+from minisgl import device as device_mod
 from minisgl.attention import create_attention_backend
 from minisgl.core import Batch, Context, Req, set_global_ctx
 from minisgl.distributed import destroy_distributed, enable_pynccl_distributed, set_tp_info
@@ -21,22 +22,26 @@ logger = init_logger(__name__)
 
 
 class ForwardOutput(NamedTuple):
-    next_tokens_gpu: torch.Tensor
+    next_tokens_device: torch.Tensor
     next_tokens_cpu: torch.Tensor
-    copy_done_event: torch.cuda.Event
+    copy_done: torch.cuda.Event | None
 
 
 class Engine:
     def __init__(self, config: EngineConfig):
-        assert not torch.cuda.is_initialized()
+        self.device = device_mod.resolve_device(config.device, rank=config.tp_info.rank)
+        if device_mod.is_cuda(self.device):
+            assert not torch.cuda.is_initialized()
         set_tp_info(rank=config.tp_info.rank, size=config.tp_info.size)
         _adjust_config(config)
 
-        self.device = torch.device(f"cuda:{config.tp_info.rank}")
-        torch.cuda.set_device(self.device)
         torch.manual_seed(42)
-        self.stream = torch.cuda.Stream()
-        torch.cuda.set_stream(self.stream)
+        if device_mod.is_cuda(self.device):
+            torch.cuda.set_device(self.device)
+            self.stream = torch.cuda.Stream()
+            torch.cuda.set_stream(self.stream)
+        else:
+            self.stream = None
         self.dtype = config.dtype
         self.ctx = Context(config.page_size)
         set_global_ctx(self.ctx)
@@ -74,7 +79,11 @@ class Engine:
 
         # ======================= Attention & MoE backend initialization ========================
         self.ctx.attn_backend = self.attn_backend = create_attention_backend(
-            config.attention_backend, config.model_config
+            config.attention_backend,
+            config.model_config,
+            kvcache=self.kv_cache,
+            page_table=self.page_table,
+            device=self.device,
         )
         if config.model_config.is_moe:
             self.ctx.moe_backend = self.moe_backend = create_moe_backend(config.moe_backend)
@@ -110,7 +119,7 @@ class Engine:
         )
 
     def _init_communication(self, config: EngineConfig) -> torch.distributed.ProcessGroup:
-        if config.tp_info.size == 1 or config.use_pynccl:
+        if config.tp_info.size == 1 or config.use_pynccl or device_mod.is_cpu(self.device):
             torch.distributed.init_process_group(
                 backend="gloo",
                 rank=config.tp_info.rank,
@@ -120,10 +129,11 @@ class Engine:
             )
             tp_cpu_group = torch.distributed.group.WORLD
             assert tp_cpu_group is not None
-            max_bytes = (
-                config.max_forward_len * config.model_config.hidden_size * self.dtype.itemsize
-            )
-            enable_pynccl_distributed(config.tp_info, tp_cpu_group, max_bytes)
+            if config.use_pynccl and device_mod.is_cuda(self.device):
+                max_bytes = (
+                    config.max_forward_len * config.model_config.hidden_size * self.dtype.itemsize
+                )
+                enable_pynccl_distributed(config.tp_info, tp_cpu_group, max_bytes)
         else:
             torch.distributed.init_process_group(
                 backend="nccl",
@@ -169,14 +179,18 @@ class Engine:
 
     def _sync_get_memory(self) -> Tuple[int, int]:
         """Get the min and max free memory across TP ranks."""
-        torch.cuda.synchronize(self.device)
-        torch.cuda.empty_cache()
-        torch.cuda.reset_peak_memory_stats(self.device)
-        free_memory = get_free_memory(self.device)
+        if device_mod.is_cuda(self.device):
+            torch.cuda.synchronize(self.device)
+            torch.cuda.empty_cache()
+            torch.cuda.reset_peak_memory_stats(self.device)
+            free_memory = get_free_memory(self.device)
+        else:
+            free_memory = device_mod.mem_get_info(self.device)[0]
         free_mem_tensor = torch.tensor([free_memory, -free_memory], device="cpu", dtype=torch.int64)
-        torch.distributed.all_reduce(
-            free_mem_tensor, op=torch.distributed.ReduceOp.MIN, group=self.tp_cpu_group
-        )
+        if torch.distributed.is_initialized():
+            torch.distributed.all_reduce(
+                free_mem_tensor, op=torch.distributed.ReduceOp.MIN, group=self.tp_cpu_group
+            )
         min_free_memory = int(free_mem_tensor[0].item())
         max_free_memory = -int(free_mem_tensor[1].item())
         if max_free_memory - min_free_memory > 2 * 1024 * 1024 * 1024:
@@ -189,7 +203,8 @@ class Engine:
         return min_free_memory, max_free_memory
 
     def forward_batch(self, batch: Batch, args: BatchSamplingArgs) -> ForwardOutput:
-        assert torch.cuda.current_stream() == self.stream
+        if device_mod.is_cuda(self.device):
+            assert torch.cuda.current_stream() == self.stream
         with self.ctx.forward_batch(batch):
             if self.graph_runner.can_use_cuda_graph(batch):
                 logits = self.graph_runner.replay(batch)
@@ -199,11 +214,13 @@ class Engine:
         for req in batch.reqs:
             req.complete_one()
 
-        next_tokens_gpu = self.sampler.sample(logits[: batch.size], args).to(torch.int32)
-        next_tokens_cpu = next_tokens_gpu.to("cpu", non_blocking=True)
-        copy_done_event = torch.cuda.Event()
-        copy_done_event.record(self.stream)
-        return ForwardOutput(next_tokens_gpu, next_tokens_cpu, copy_done_event)
+        next_tokens_device = self.sampler.sample(logits[: batch.size], args).to(torch.int32)
+        next_tokens_cpu = next_tokens_device.to("cpu", non_blocking=True)
+        copy_done = None
+        if device_mod.is_cuda(self.device):
+            copy_done = torch.cuda.Event()
+            copy_done.record(self.stream)
+        return ForwardOutput(next_tokens_device, next_tokens_cpu, copy_done)
 
     def shutdown(self) -> None:
         self.graph_runner.destroy_cuda_graphs()
@@ -219,14 +236,41 @@ def _adjust_config(config: EngineConfig):
     def override(attr: str, value: Any):  # this is dangerous, use with caution
         object.__setattr__(config, attr, value)
 
-    if config.attention_backend == "auto":
-        backend = "trtllm" if is_sm100_supported() else ("fa,fi" if is_sm90_supported() else "fi")
-        override("attention_backend", backend)
-        logger.info_rank0(f"Auto-selected attention backend: {config.attention_backend}")
+    device = device_mod.resolve_device(config.device, rank=config.tp_info.rank)
 
-    if "trtllm" in config.attention_backend and config.page_size not in [16, 32, 64]:
+    requested_backends = config.attention_backend.split(",")
+
+    if device_mod.is_cpu(device):
+        if config.attention_backend == "auto":
+            backend = "cpu"
+            override("attention_backend", backend)
+            logger.info_rank0(f"Auto-selected attention backend: {config.attention_backend}")
+        elif config.attention_backend != "cpu":
+            raise ValueError(
+                f"CPU execution requires attention backend 'cpu', got {config.attention_backend!r}."
+            )
+    else:
+        if any(backend == "cpu" for backend in requested_backends):
+            raise ValueError(
+                f"CUDA execution requires CUDA attention backends, got {config.attention_backend!r}."
+            )
+        if config.attention_backend == "auto":
+            backend = (
+                "trtllm" if is_sm100_supported() else ("fa,fi" if is_sm90_supported() else "fi")
+            )
+            override("attention_backend", backend)
+            logger.info_rank0(f"Auto-selected attention backend: {config.attention_backend}")
+
+    if (
+        device_mod.is_cuda(device)
+        and "trtllm" in config.attention_backend
+        and config.page_size not in [16, 32, 64]
+    ):
         override("page_size", 64)
         logger.warning_rank0("Page size is overridden to 64 for TRTLLM backend")
+
+    if device_mod.is_cpu(device) and config.model_config.is_moe:
+        raise ValueError("CPU execution does not support MoE models.")
 
     if config.model_config.is_moe and config.moe_backend == "auto":
         override("moe_backend", "fused")

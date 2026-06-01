@@ -5,8 +5,33 @@ import math
 from typing import Any, Callable, Dict, Tuple
 
 import torch
+from minisgl import device as device_mod
 
 from .base import StateLessOP
+
+
+def _cpu_rope_inplace(
+    positions: torch.Tensor,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    head_size: int,
+    cos_sin_cache: torch.Tensor,
+) -> None:
+    num_tokens = query.shape[0]
+    num_q_heads = query.shape[1] // head_size
+    num_k_heads = key.shape[1] // head_size
+    half_dim = head_size // 2
+
+    q = query.view(num_tokens, num_q_heads, head_size)
+    k = key.view(num_tokens, num_k_heads, head_size)
+    cos_sin = cos_sin_cache[positions]
+    cos = cos_sin[..., :half_dim].unsqueeze(1)
+    sin = cos_sin[..., half_dim:].unsqueeze(1)
+
+    q1, q2 = q[..., :half_dim], q[..., half_dim:]
+    k1, k2 = k[..., :half_dim], k[..., half_dim:]
+    query.copy_(torch.cat([q1 * cos - q2 * sin, q2 * cos + q1 * sin], dim=-1).flatten(1))
+    key.copy_(torch.cat([k1 * cos - k2 * sin, k2 * cos + k1 * sin], dim=-1).flatten(1))
 
 
 class RotaryEmbedding(StateLessOP):
@@ -32,17 +57,18 @@ class RotaryEmbedding(StateLessOP):
         self._cos_sin_cache = torch.cat((cos, sin), dim=-1)
         assert self.head_size in [64, 128, 256, 512]
 
-        from flashinfer import apply_rope_with_cos_sin_cache_inplace
-
-        self.apply_rope_with_cos_sin_cache_inplace = apply_rope_with_cos_sin_cache_inplace
-
     def forward(
         self,
         positions: torch.Tensor,
         query: torch.Tensor,
         key: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        self.apply_rope_with_cos_sin_cache_inplace(
+        if device_mod.is_cpu(query.device):
+            apply_rope_with_cos_sin_cache_inplace = _cpu_rope_inplace
+        else:
+            from flashinfer import apply_rope_with_cos_sin_cache_inplace
+
+        apply_rope_with_cos_sin_cache_inplace(
             positions=positions,
             query=query,
             key=key,
@@ -97,7 +123,11 @@ def _get_rope(
             orig_max_pos: int = rope_scaling["original_max_position_embeddings"]
 
             def _find_correction_dim(num_rotations: float) -> float:
-                return rotary_dim * math.log(orig_max_pos / (num_rotations * 2 * math.pi)) / (2 * math.log(base))
+                return (
+                    rotary_dim
+                    * math.log(orig_max_pos / (num_rotations * 2 * math.pi))
+                    / (2 * math.log(base))
+                )
 
             low = max(math.floor(_find_correction_dim(beta_fast)), 0)
             high = min(math.ceil(_find_correction_dim(beta_slow)), rotary_dim // 2 - 1)
@@ -105,7 +135,8 @@ def _get_rope(
             def post_process(inv_freq: torch.Tensor) -> torch.Tensor:
                 ramp = torch.clamp(
                     (torch.arange(rotary_dim // 2, dtype=torch.float32) - low) / max(high - low, 1),
-                    0, 1,
+                    0,
+                    1,
                 )
                 return (inv_freq / factor) * ramp + inv_freq * (1 - ramp)
 
